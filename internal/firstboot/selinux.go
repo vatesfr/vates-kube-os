@@ -78,15 +78,18 @@ func selinuxState(r Runner) SELinuxState {
 // withheld. Without these two, the node stays NotReady with "cni plugin not
 // initialized" and no pod anywhere in the cluster can start.
 //
-// /run/flannel always: flanneld writes the pod network's subnet file there, and
-// the CNI plugin on the host reads it to configure every pod's sandbox. Labelled
-// container_var_run_t, it is not writable by container_t, and flanneld reports
+// The pod network's runtime state under /run, always (see CNIRunDirs): the
+// directories are the CNI's, so they are labelled with the CNI. flanneld writes
+// the pod network's subnet file into /run/flannel, and the CNI plugin on the
+// host reads it to configure every pod's sandbox. Labelled container_var_run_t,
+// it is not writable by container_t, and flanneld reports
 //
 //	Failed to write subnet file: open /run/flannel/.subnet.env: permission denied
 //
 // while appearing to run perfectly -- the DaemonSet is 1/1 Running. What fails
 // instead is every pod's sandbox, with a message pointing at the CNI plugin
-// rather than at a directory permission.
+// rather than at a directory permission. The Cilium agent keeps its state under
+// /run/cilium for the same reason.
 //
 // /var/lib/kubelet always: the kubelet writes each pod's volumes under it --
 // ConfigMap files, and the secret and downward-API items of the projected token
@@ -106,13 +109,15 @@ func ContainerPaths(cfg *vatescfg.Config) []string {
 		"/opt/cni/bin",
 		"/etc/cni/net.d",
 		"/var/lib/kubelet",
-		"/run/flannel",
 		// The fetched Kubernetes binaries. A file the container wrote has the
 		// directory's type, and executing it needs a type the container domain can
 		// execute -- without it the launcher downloads a kubelet it is then not
 		// allowed to run.
 		BinariesDir,
 	}
+	// The pod network's runtime state is the CNI's, so a node labels only what
+	// its own CNI writes (see CNIRunDirs).
+	paths = append(paths, CNIRunDirs(cfg.CNI.Plugin)...)
 	if cfg.Role == vatescfg.RoleMaster {
 		paths = append(paths, EtcdDataDir)
 	}

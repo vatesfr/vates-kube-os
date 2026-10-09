@@ -123,9 +123,9 @@ configdrives: ## Regenerate the NoCloud config drives from their directories
 # and libvirt's polkit rule waives the password for qemu:///system for its own
 # group only. test/cluster.sh checks both up front and prints the fix.
 cluster: ## Bring up a cluster under libvirt (CP= WORKERS= DASHBOARD= CNI= IMAGE= EFIVARS= START_STAGGER= CONFIG_FORM=)
-	K8S_VERSION=$(K8S_VERSION) CP=$(CP) WORKERS=$(WORKERS) DASHBOARD=$(DASHBOARD) CNI=$(CNI) KUBE_PROXY_REPLACEMENT=$(KUBE_PROXY_REPLACEMENT) IMAGE=$(IMAGE) EFIVARS=$(EFIVARS) START_STAGGER=$(START_STAGGER) CONFIG_FORM=$(CONFIG_FORM) ./test/cluster.sh up
+	K8S_VERSION=$(K8S_VERSION) CP=$(CP) WORKERS=$(WORKERS) DASHBOARD=$(DASHBOARD) CNI=$(CNI) IMAGE=$(IMAGE) EFIVARS=$(EFIVARS) START_STAGGER=$(START_STAGGER) CONFIG_FORM=$(CONFIG_FORM) ./test/cluster.sh up
 
-cilium: ## Install Cilium on the running test cluster (replaces flannel and kube-proxy)
+cilium: ## Retrofit Cilium onto a running flannel test cluster (manual; CNI=cilium installs it from the image)
 	./test/cilium.sh
 
 cluster-wait: ## Wait until every machine is Ready (polls the condition)

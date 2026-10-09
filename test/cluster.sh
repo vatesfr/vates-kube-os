@@ -81,12 +81,14 @@ case "${DASHBOARD}" in
   *) echo "FATAL: DASHBOARD=${DASHBOARD} is not one of tui, gui" >&2; exit 1 ;;
 esac
 
-# The cluster's CNI. flannel is installed by the node itself. cilium means the
-# node installs none (cni.plugin: none) and kube-proxy is omitted, and the
-# harness installs Cilium from the host once the API answers -- see
-# test/cilium.sh and docs/ARCHITECTURE.md.
+# The cluster's CNI, chosen in the node document: flannel is the default, and
+# cilium is installed by the node itself the same way (its manifest, pinned, is
+# embedded in the image and applied at bootstrap). Neither replaces kube-proxy.
 #
 #   CNI=cilium make cluster
+#
+# Bringing up Cilium on a cluster whose nodes do not install it is a manual
+# retrofit, covered by test/cilium.sh (make cilium).
 CNI="${CNI:-flannel}"
 case "${CNI}" in
   flannel|cilium) ;;
@@ -243,15 +245,10 @@ write_drive() {
 "
   fi
 
-  # The CNI block differs for Cilium: the node installs no CNI (cni.plugin:
-  # none) and kubeadm is told not to install kube-proxy, which Cilium replaces.
-  local cni_plugin="flannel" proxy_block=""
-  if [ "${CNI}" = "cilium" ]; then
-    cni_plugin="none"
-    proxy_block="  proxy:
-    disabled: true
-"
-  fi
+  # The CNI the node installs itself, stated in its document. Both are
+  # applied by the node at bootstrap -- see internal/firstboot -- and both
+  # run alongside kube-proxy, so nothing else in the document changes.
+  local cni_plugin="${CNI}"
 
   local doc
   doc="$(cat <<EOF
@@ -260,7 +257,7 @@ kubernetes:
   version: ${K8S_VERSION}
 cluster:
   controlPlaneEndpoint: "${ENDPOINT}"
-${proxy_block}${extra}${vip_block}network:
+${extra}${vip_block}network:
   iface: eth0
   mode: dhcp
 cni:
@@ -441,17 +438,6 @@ do_up() {
   }
   ts "address ${cp1_ip}; kubeconfig fetched over the API"
 
-  # A CNI the node does not install is installed here, from the host, once the
-  # API answers. The node stays NotReady -- and so the wait below would time out
-  # -- until it is up, which is the contract of cni.plugin: none.
-  if [ "${CNI}" = "cilium" ]; then
-    say "installing Cilium (the cluster's CNI)"
-    WORK="${WORK}" CLUSTER="${CLUSTER}" VIP="${VIP}" \
-      KUBE_PROXY_REPLACEMENT="${KUBE_PROXY_REPLACEMENT:-true}" \
-      "${ROOT}/test/cilium.sh" "${CP_NODES[0]}" \
-      || die "Cilium did not come up"
-  fi
-
   # A single-node control plane comes up on its own; wait for the API server
   # before asking it for anything.
   local i ready=0
@@ -584,6 +570,47 @@ do_wait() {
       die "${ready}/${want} nodes Ready after 15 minutes"
     fi
     sleep 10
+  done
+
+  # Every node Ready is not the cluster up: the kubelet reports Ready as soon as
+  # a CNI conflist exists, and a CNI whose agent socket the plugins cannot reach
+  # (a Cilium that lost its /var/run -> /run link) leaves every pod -- CoreDNS
+  # included -- in ContainerCreating while the nodes all say Ready. So the wait
+  # ends only when a pod that needs the pod network is actually Running.
+  wait_pod_network "${first}"
+}
+
+# wait_pod_network waits until at least one CoreDNS pod is Running, which is the
+# proof that the pod network programs sandboxes. `Ready` nodes are not the
+# proof: the kubelet is satisfied with a conflist on disk, and a CNI whose agent
+# socket the plugin cannot dial keeps every pod in ContainerCreating -- CoreDNS
+# among them -- with the nodes still Ready.
+#
+# CoreDNS is the pod to ask: the addons always deploy it on the control planes,
+# and it cannot start until its sandbox is programmed, so its being Running is
+# the CNI working. Polls cheaply, and on failure names the cause -- the stuck
+# pod and the CNI error in its describe -- rather than "nodes Ready".
+wait_pod_network() { # <name>
+  local name="$1" deadline=$(( $(date +%s) + 300 )) running
+  while :; do
+    running=$(host_kubectl "${name}" -n kube-system get pods -l k8s-app=kube-dns --no-headers 2>/dev/null \
+      | grep -c " Running " || true)
+    ts "CoreDNS Running: ${running}"
+    [ "${running}" -ge 1 ] && { ts "the pod network programs sandboxes (CoreDNS is Running)"; return 0; }
+    if [ "$(date +%s)" -ge "${deadline}" ]; then
+      echo "  the nodes are Ready but no pod can start; the CNI is the thing to look at:" >&2
+      host_kubectl "${name}" -n kube-system get pods -l k8s-app=kube-dns -o wide 2>&1 | sed 's/^/    /' >&2
+      local pod
+      pod=$(host_kubectl "${name}" -n kube-system get pods -l k8s-app=kube-dns \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+      if [ -n "${pod}" ]; then
+        echo "  and the CNI error from the pod's describe:" >&2
+        host_kubectl "${name}" -n kube-system describe pod "${pod}" 2>&1 \
+          | sed -n '/^Events:/,$p' | tail -14 | sed 's/^/    /' >&2
+      fi
+      die "the nodes are Ready but CoreDNS never ran; the pod network is not working"
+    fi
+    sleep 5
   done
 }
 

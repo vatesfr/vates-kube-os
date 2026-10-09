@@ -79,6 +79,52 @@ func mountVar() {
 			kmsg("var: mkdir %s: %v", d, err)
 		}
 	}
+
+	// /var/run -> /run: the standard link, recreated on the mounted /var at
+	// every boot. It is a link and not a directory because the CNI plugins are
+	// compiled with /var/run paths -- Cilium's cilium-cni dials
+	// /var/run/cilium/cilium.sock -- while the agent's cilium-run hostPath is
+	// /run/cilium, the tmpfs. Through the link the plugin's compiled path
+	// reaches the socket the agent listens on. Without it, the path is a
+	// directory that does not exist, and every pod's sandbox fails with
+	// "dial unix /var/run/cilium/cilium.sock: no such file or directory"
+	// while the node stays Ready (the kubelet is happy as soon as a conflist
+	// exists; only the plugin's first dial proves the socket is reachable).
+	if err := ensureSymlink("/var/run", "/run"); err != nil {
+		kmsg("var: /var/run -> /run: %v", err)
+	}
+}
+
+// ensureSymlink makes linkPath a symlink to target, idempotently, replacing
+// what is there only when it is a symlink (with a different target) or a
+// directory.
+//
+// A directory is replaced and not kept: a real /var/run would shadow the tmpfs
+// /run and resolve the CNI plugins' compiled paths to a place the agent never
+// listens, which is the exact failure the link exists to prevent. The replaced
+// directory is runtime state (sockets, pid files) that the processes that own
+// it recreate, so removing it is safe. A regular file is an error and is left
+// alone: it is not something this boot is allowed to delete.
+func ensureSymlink(linkPath, target string) error {
+	le, err := os.Lstat(linkPath)
+	switch {
+	case err == nil && le.Mode()&os.ModeSymlink != 0:
+		if dst, e := os.Readlink(linkPath); e == nil && dst == target {
+			return nil // already the right link
+		}
+		if err := os.Remove(linkPath); err != nil {
+			return err
+		}
+	case err == nil && le.IsDir():
+		if err := os.RemoveAll(linkPath); err != nil {
+			return err
+		}
+	case err == nil:
+		return fmt.Errorf("%s exists and is neither a symlink nor a directory", linkPath)
+	case !os.IsNotExist(err):
+		return err
+	}
+	return os.Symlink(target, linkPath)
 }
 
 // varRuntimeDirs are the /var directories the image's runtime-written symlinks

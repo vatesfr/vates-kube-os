@@ -63,6 +63,10 @@ var BootstrapPhases = []string{
 // kube-proxy must never have kube-proxy written at all -- deleting it afterwards
 // leaves its iptables rules behind, which is why the choice is made here and not
 // by a cleanup step.
+//
+// Only cni.plugin: none reaches that branch: the flannel and cilium the node
+// installs itself both run alongside kube-proxy, and Validate refuses the
+// other combinations (see the proxy.disabled check).
 func bootstrapPhases(cfg *vatescfg.Config) []string {
 	if !cfg.Cluster.Proxy.Disabled {
 		return BootstrapPhases
@@ -74,6 +78,32 @@ func bootstrapPhases(cfg *vatescfg.Config) []string {
 		}
 	}
 	return append(phases, "addon coredns")
+}
+
+// cniManifest returns the manifest of the CNI this node installs itself, and
+// the path it is written to before being applied.
+//
+// flannel and cilium are both the node's to install: the pod network is applied
+// here, on the bootstrapping control plane, and the DaemonSet (and the operator,
+// for cilium) carries it to every node that joins. none is not: the CNI is the
+// operator's to install from the cluster side, and the node writes nothing, so
+// the path comes back empty and the caller says so out loud.
+//
+// Both manifests are embedded and pinned -- see FlannelManifest and
+// CiliumManifest -- and the pod network they are told is the same field,
+// cni.cidr: flannel is given the range directly, and cilium reads it from the
+// node's podCIDR annotation, which kubeadm writes from it.
+func cniManifest(cfg *vatescfg.Config) (path string, manifest []byte, err error) {
+	switch cfg.CNI.Plugin {
+	case vatescfg.CNIFlannel:
+		manifest, err = FlannelManifest(cfg)
+		return FlannelManifestPath, manifest, err
+	case vatescfg.CNICilium:
+		manifest, err = CiliumManifest(cfg)
+		return CiliumManifestPath, manifest, err
+	default: // CNINone
+		return "", nil, nil
+	}
 }
 
 // JoinAttempts is how many times a control plane's join is retried.
@@ -172,15 +202,15 @@ func bootstrapStage(cfg *vatescfg.Config, drive *configdrive.Drive, paths Paths,
 	// addon phase fails, the file that explains what should be running is
 	// already on disk to be read and applied by hand. A CNI the node does not
 	// install (cni.plugin: none) writes nothing: the operator installs it.
-	if cfg.CNI.Plugin == vatescfg.CNIFlannel {
-		flannel, err := FlannelManifest(cfg)
-		if err != nil {
-			return err
-		}
-		if err := r.WriteFile(FlannelManifestPath, 0o644, flannel); err != nil {
+	cniPath, cniData, err := cniManifest(cfg)
+	if err != nil {
+		return err
+	}
+	if cniPath != "" {
+		if err := r.WriteFile(cniPath, 0o644, cniData); err != nil {
 			return fmt.Errorf("writing the CNI manifest: %w", err)
 		}
-		r.Logf("wrote the CNI manifest to %s", FlannelManifestPath)
+		r.Logf("wrote the CNI manifest to %s", cniPath)
 	}
 
 	phasesStart := time.Now()
@@ -196,14 +226,17 @@ func bootstrapStage(cfg *vatescfg.Config, drive *configdrive.Drive, paths Paths,
 
 	// The CNI itself. Without it the node stays NotReady -- the kubelet reports
 	// "network plugin is not ready" -- no pod can be scheduled, and CoreDNS,
-	// which the addon phase just created, never gets an address. With
-	// cni.plugin: none the node installs nothing and says so: it stays NotReady
-	// until the operator applies the cluster's CNI, which is the contract.
-	if cfg.CNI.Plugin == vatescfg.CNIFlannel {
+	// which the addon phase just created, never gets an address. For cilium the
+	// same is true while the operator creates the CRDs the agent waits on, which
+	// is why the manifest carries the operator: in this chart the CRDs are no
+	// longer a file to apply, they are created by it. With cni.plugin: none the
+	// node installs nothing and says so: it stays NotReady until the operator
+	// applies the cluster's CNI, which is the contract.
+	if cniPath != "" {
 		r.Progress("applying the pod network")
 		start := time.Now()
 		apply := kubectlArgs("--kubeconfig="+SuperAdminKubeconfig,
-			"apply", "-f", FlannelManifestPath)
+			"apply", "-f", cniPath)
 		if _, err := r.Run(apply[0], apply[1:]...); err != nil {
 			return fmt.Errorf("applying the CNI manifest: %w", err)
 		}

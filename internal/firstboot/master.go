@@ -89,13 +89,6 @@ spec:
 func RequiredDirs(cfg *vatescfg.Config) []string {
 	dirs := []string{
 		KubeletRootDir,
-		// /run is a tmpfs, so this does not survive a reboot and has to be
-		// recreated every boot. flanneld writes the pod network's subnet file
-		// into it, and the CNI plugin on the host reads it back; the directory
-		// is also labelled for containers, and labelling a path that does not
-		// exist fails -- which is how a fresh node failed to configure itself
-		// while an already-configured one worked.
-		"/run/flannel",
 		// The kubelet reads its KubeletConfiguration from here through
 		// --config.
 		"/etc/kubelet",
@@ -105,10 +98,38 @@ func RequiredDirs(cfg *vatescfg.Config) []string {
 		// the writable /var, and the kubelet needs it at every start.
 		BinariesDir,
 	}
+	// The pod network's runtime state lives on the tmpfs /run, which PID 1
+	// mounts and which a reboot wipes, so it has to be recreated every boot.
+	// It is the CNI's, so it is chosen with the CNI -- a node creates only what
+	// its own CNI needs.
+	dirs = append(dirs, CNIRunDirs(cfg.CNI.Plugin)...)
 	if cfg.Role == vatescfg.RoleMaster {
 		dirs = append(dirs, EtcdDataDir, ManifestsDir)
 	}
 	return dirs
+}
+
+// CNIRunDirs are the pod network's runtime directories, on the tmpfs /run.
+//
+// They are the CNI's, so they are chosen with the CNI:
+//   - flanneld writes the pod network's subnet file into /run/flannel, and the
+//     CNI plugin on the host reads it back to configure every pod's sandbox.
+//   - the Cilium agent keeps its state under /run/cilium and the pod network
+//     namespaces at /run/netns.
+//   - "none" installs no CNI, so the node creates nothing for it.
+//
+// They are also labelled for containers (see ContainerPaths), and labelling a
+// path that does not exist fails -- which is how a fresh node once failed to
+// configure itself while an already-configured one worked.
+func CNIRunDirs(plugin string) []string {
+	switch plugin {
+	case vatescfg.CNICilium:
+		return []string{"/run/cilium", "/run/netns"}
+	case vatescfg.CNINone:
+		return nil
+	default: // CNIFlannel
+		return []string{"/run/flannel"}
+	}
 }
 
 // MasterFiles computes what a bootstrapping control plane node needs on disk
