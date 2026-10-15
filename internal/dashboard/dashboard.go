@@ -9,19 +9,18 @@ import (
 
 // Snapshot is one observation of the node.
 type Snapshot struct {
-	Node   kubeapi.Node
-	Pods   []kubeapi.Pod
-	Events []kubeapi.Event
-
-	// Ready and ReadyReason are pulled out because every screen shows them and
-	// the condition list is awkward to read from a template.
-	Ready       bool
-	ReadyReason string
-
 	// ReadyAt is when the node last became Ready, and is zero when it never
 	// has (or the API did not say). It is the boundary the event feed uses to
 	// tell a boot event from one on a node that is up -- see BootEvent.
-	ReadyAt time.Time
+	ReadyAt     time.Time
+	ReadyReason string
+	Node        kubeapi.Node
+	Pods        []kubeapi.Pod
+	Events      []kubeapi.Event
+
+	// Ready and ReadyReason are pulled out because every screen shows them and
+	// the condition list is awkward to read from a template.
+	Ready bool
 }
 
 // MaxEvents bounds how many events are kept. The dashboard shows a tail; the

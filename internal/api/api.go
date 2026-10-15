@@ -37,6 +37,12 @@ const (
 // Options configure a server. Every field has a working default on a control
 // plane, so vates-api.service passes none of them.
 type Options struct {
+	// JoinMaterial produces fresh credentials for a machine that joins this
+	// cluster. Empty means this node cannot issue any: they are signed or
+	// encrypted with the cluster CA, which only a bootstrapped control plane
+	// holds, so a worker -- and a control plane that has not bootstrapped --
+	// leaves this nil and the method fails cleanly.
+	JoinMaterial func(context.Context) (JoinMaterial, error)
 	// Listen is host:port. Empty means every interface on DefaultPort.
 	Listen string
 	// CAPath is the authority that signs the server certificate and verifies
@@ -50,12 +56,6 @@ type Options struct {
 	// means DefaultCertPath and DefaultKeyPath.
 	CertPath string
 	KeyPath  string
-	// JoinMaterial produces fresh credentials for a machine that joins this
-	// cluster. Empty means this node cannot issue any: they are signed or
-	// encrypted with the cluster CA, which only a bootstrapped control plane
-	// holds, so a worker -- and a control plane that has not bootstrapped --
-	// leaves this nil and the method fails cleanly.
-	JoinMaterial func(context.Context) (JoinMaterial, error)
 }
 
 // JoinMaterial is what a joining machine needs from the cluster: a bootstrap

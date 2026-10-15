@@ -269,26 +269,26 @@ func printJSON(s dashboard.Snapshot, h hostinfo.Info) {
 	type nodeView struct {
 		Name    string   `json:"name"`
 		Role    string   `json:"role"`
-		Ready   bool     `json:"ready"`
 		Reason  string   `json:"reason,omitempty"`
 		Address string   `json:"address"`
 		Kubelet string   `json:"kubelet"`
 		Runtime string   `json:"runtime"`
 		OSImage string   `json:"os_image"`
 		Taints  []string `json:"taints"`
+		Ready   bool     `json:"ready"`
 	}
 	type hostView struct {
-		UptimeSeconds int64     `json:"uptime_seconds"`
-		CPUs          int       `json:"cpus"`
 		CPUModel      string    `json:"cpu_model"`
-		CPUPercent    float64   `json:"cpu_percent"`
-		MemTotalBytes uint64    `json:"mem_total_bytes"`
-		MemPercent    float64   `json:"mem_percent"`
-		Procs         int       `json:"procs"`
 		Load          []float64 `json:"load"`
 		Gateways      []string  `json:"gateways"`
 		DNS           []string  `json:"dns"`
 		NTP           []string  `json:"ntp"`
+		UptimeSeconds int64     `json:"uptime_seconds"`
+		CPUs          int       `json:"cpus"`
+		CPUPercent    float64   `json:"cpu_percent"`
+		MemTotalBytes uint64    `json:"mem_total_bytes"`
+		MemPercent    float64   `json:"mem_percent"`
+		Procs         int       `json:"procs"`
 	}
 	type eventView struct {
 		When    string `json:"when"`
@@ -320,11 +320,11 @@ func printJSON(s dashboard.Snapshot, h hostinfo.Info) {
 	}
 
 	out := struct {
-		Node   nodeView    `json:"node"`
-		Host   hostView    `json:"host"`
-		Pods   podCounts   `json:"pods"`
-		Events []eventView `json:"events"`
 		Error  string      `json:"error,omitempty"`
+		Host   hostView    `json:"host"`
+		Node   nodeView    `json:"node"`
+		Events []eventView `json:"events"`
+		Pods   podCounts   `json:"pods"`
 	}{
 		Node: nodeView{
 			Name:    s.Node.Metadata.Name,

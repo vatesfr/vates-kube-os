@@ -28,26 +28,26 @@ type pid1Mount struct {
 	source string
 	target string
 	fstype string
-	flags  uintptr
 	data   string
+	flags  uintptr
 }
 
 // pid1Mounts is what has to be mounted before containerd, the kubelet and the
 // console can work. Order matters: /dev before /dev/pts and /dev/shm, /sys
 // before /sys/fs/cgroup and /sys/fs/bpf.
 var pid1Mounts = []pid1Mount{
-	{"proc", "/proc", "proc", 0, ""},
-	{"sysfs", "/sys", "sysfs", 0, ""},
+	{"proc", "/proc", "proc", "", 0},
+	{"sysfs", "/sys", "sysfs", "", 0},
 	// bpffs, for Cilium. Its agent pins its BPF maps and programs under
 	// /sys/fs/bpf, and it expects the filesystem to be there: without it the
 	// agent's first pin fails. A distribution mounts it at boot (systemd does);
 	// with `vates` as PID 1, PID 1 does.
-	{"bpf", "/sys/fs/bpf", "bpf", 0, "mode=0700"},
-	{"devtmpfs", "/dev", "devtmpfs", syscall.MS_NOSUID, "mode=0755"},
-	{"devpts", "/dev/pts", "devpts", 0, "mode=0620,ptmxmode=0666"},
-	{"tmpfs", "/dev/shm", "tmpfs", syscall.MS_NOSUID | syscall.MS_NODEV, "mode=1777"},
-	{"tmpfs", "/run", "tmpfs", syscall.MS_NOSUID | syscall.MS_NODEV, "mode=0755"},
-	{"tmpfs", "/tmp", "tmpfs", syscall.MS_NOSUID | syscall.MS_NODEV, "mode=1777"},
+	{"bpf", "/sys/fs/bpf", "bpf", "mode=0700", 0},
+	{"devtmpfs", "/dev", "devtmpfs", "mode=0755", syscall.MS_NOSUID},
+	{"devpts", "/dev/pts", "devpts", "mode=0620,ptmxmode=0666", 0},
+	{"tmpfs", "/dev/shm", "tmpfs", "mode=1777", syscall.MS_NOSUID | syscall.MS_NODEV},
+	{"tmpfs", "/run", "tmpfs", "mode=0755", syscall.MS_NOSUID | syscall.MS_NODEV},
+	{"tmpfs", "/tmp", "tmpfs", "mode=1777", syscall.MS_NOSUID | syscall.MS_NODEV},
 }
 
 const (

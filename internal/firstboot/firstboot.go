@@ -39,8 +39,8 @@ func DefaultPaths() Paths {
 // readable even momentarily.
 type File struct {
 	Path    string
-	Mode    os.FileMode
 	Content []byte
+	Mode    os.FileMode
 }
 
 // NodeIP returns the interface's first IPv4 address.
@@ -369,11 +369,11 @@ func apiCAFiles(cfg *vatescfg.Config, drive *configdrive.Drive) []File {
 	for _, f := range []struct {
 		onDrive string
 		path    string
-		mode    os.FileMode
 		fromDoc string
+		mode    os.FileMode
 	}{
-		{"api-ca.crt", OperatorCAPath, 0o644, cfg.PKI.APICA.Cert},
-		{"api-ca.key", OperatorCAKeyPath, 0o600, cfg.PKI.APICA.Key},
+		{onDrive: "api-ca.crt", path: OperatorCAPath, fromDoc: cfg.PKI.APICA.Cert, mode: 0o644},
+		{onDrive: "api-ca.key", path: OperatorCAKeyPath, fromDoc: cfg.PKI.APICA.Key, mode: 0o600},
 	} {
 		// The document wins when it carries the material: on the CAPI path it is
 		// the only channel. The drive files are the direct-drive path.

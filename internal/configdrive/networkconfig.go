@@ -52,7 +52,6 @@ func (d *Drive) StaticNetwork() (*StaticNetwork, error) {
 // parseNetworkConfig reads the netplan v2 subset above.
 func parseNetworkConfig(raw []byte) (*StaticNetwork, error) {
 	var doc struct {
-		Version   int `yaml:"version"`
 		Ethernets map[string]struct {
 			DHCP4     *bool    `yaml:"dhcp4"`
 			Addresses []string `yaml:"addresses"`
@@ -67,6 +66,7 @@ func parseNetworkConfig(raw []byte) (*StaticNetwork, error) {
 				Addresses []string `yaml:"addresses"`
 			} `yaml:"nameservers"`
 		} `yaml:"ethernets"`
+		Version int `yaml:"version"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("network-config: %w", err)

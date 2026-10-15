@@ -12,15 +12,15 @@ import (
 // rectangular clip. It wraps gg for the shapes and carries the text layout on
 // top.
 type Context struct {
-	dc     *gg.Context
-	img    *image.RGBA
-	colour uint32
+	dc  *gg.Context
+	img *image.RGBA
 
 	// clip is the one kind of clipping this console uses: a rectangle. It is
 	// applied to text by drawing into a sub-image of the frame, which the font
 	// drawer clips at its bounds for free. Shapes drawn while it is set are the
 	// band's own fill, which is the clip, so they need no help.
-	clip *image.Rectangle
+	clip   *image.Rectangle
+	colour uint32
 }
 
 // New prepares a context on a surface.

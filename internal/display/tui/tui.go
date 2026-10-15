@@ -96,12 +96,12 @@ type (
 	// the life of the process -- leaves every sample without a predecessor.
 	snapshotMsg struct {
 		snapshot   dashboard.Snapshot
-		host       hostinfo.Info
+		err        error
 		hostReader hostinfo.Reader
 		client     *kubeapi.Client
 		k8sLocal   string
 		nodeIP     string
-		err        error
+		host       hostinfo.Info
 	}
 )
 
@@ -271,9 +271,9 @@ var (
 
 // pair is one labelled value.
 type pair struct {
+	style lipgloss.Style
 	label string
 	value string
-	style lipgloss.Style
 }
 
 // field builds a labelled value, showing n/a when the cluster has not supplied
@@ -406,12 +406,12 @@ func (m Model) version() string {
 
 // nodeStatus is the STAGE / READY / SYSTEM triple and the styles that colour it.
 type nodeStatus struct {
-	stage       string
 	stageStyle  lipgloss.Style
-	ready       string
 	readyStyle  lipgloss.Style
-	system      string
 	systemStyle lipgloss.Style
+	stage       string
+	ready       string
+	system      string
 }
 
 // status computes the machine's displayed state.

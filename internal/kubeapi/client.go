@@ -15,16 +15,16 @@ import (
 // Node is the part of a Node object the dashboard reads.
 type Node struct {
 	Metadata struct {
-		Name   string            `json:"name"`
 		Labels map[string]string `json:"labels"`
+		Name   string            `json:"name"`
 	} `json:"metadata"`
-	Spec struct {
-		Taints []struct {
-			Key    string `json:"key"`
-			Effect string `json:"effect"`
-		} `json:"taints"`
-	} `json:"spec"`
 	Status struct {
+		NodeInfo struct {
+			KubeletVersion          string `json:"kubeletVersion"`
+			OSImage                 string `json:"osImage"`
+			KernelVersion           string `json:"kernelVersion"`
+			ContainerRuntimeVersion string `json:"containerRuntimeVersion"`
+		} `json:"nodeInfo"`
 		Conditions []struct {
 			Type               string `json:"type"`
 			Status             string `json:"status"`
@@ -36,13 +36,13 @@ type Node struct {
 			Type    string `json:"type"`
 			Address string `json:"address"`
 		} `json:"addresses"`
-		NodeInfo struct {
-			KubeletVersion          string `json:"kubeletVersion"`
-			OSImage                 string `json:"osImage"`
-			KernelVersion           string `json:"kernelVersion"`
-			ContainerRuntimeVersion string `json:"containerRuntimeVersion"`
-		} `json:"nodeInfo"`
 	} `json:"status"`
+	Spec struct {
+		Taints []struct {
+			Key    string `json:"key"`
+			Effect string `json:"effect"`
+		} `json:"taints"`
+	} `json:"spec"`
 }
 
 // Role reports the node's control-plane role, read from the label Kubernetes
@@ -175,6 +175,11 @@ func (p Pod) Ready() (ready, total, restarts int) {
 // get events` reads, it is what the kubelet and the scheduler write, and it is
 // the one whose field selectors are documented.
 type Event struct {
+	InvolvedObject struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+	} `json:"involvedObject"`
 	Metadata struct {
 		Name      string `json:"name"`
 		Namespace string `json:"namespace"`
@@ -182,15 +187,10 @@ type Event struct {
 	Type           string `json:"type"`
 	Reason         string `json:"reason"`
 	Message        string `json:"message"`
-	Count          int    `json:"count"`
 	FirstTimestamp string `json:"firstTimestamp"`
 	LastTimestamp  string `json:"lastTimestamp"`
 	EventTime      string `json:"eventTime"`
-	InvolvedObject struct {
-		Kind      string `json:"kind"`
-		Namespace string `json:"namespace"`
-		Name      string `json:"name"`
-	} `json:"involvedObject"`
+	Count          int    `json:"count"`
 }
 
 // When returns the best timestamp an Event has.

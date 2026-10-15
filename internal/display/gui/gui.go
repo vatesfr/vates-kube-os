@@ -38,25 +38,25 @@ type Watch func(ctx context.Context, fn func(kubeapi.Event)) error
 
 // Options is what the caller decides.
 type Options struct {
-	// Interval is how often the collection is refreshed.
-	Interval time.Duration
-
 	// Watch streams events as they happen. Optional.
 	Watch Watch
+
+	// Device is the DRM card to take. Empty means the default.
+	Device string
 
 	// Assets are the directories searched for the wordmark, in order: beside
 	// the binary when run from a checkout, and /usr/share when installed.
 	Assets []string
 
-	// Device is the DRM card to take. Empty means the default.
-	Device string
+	// Interval is how often the collection is refreshed.
+	Interval time.Duration
 }
 
 // frame is one collection on its way to the drawing.
 type frame struct {
 	snapshot dashboard.Snapshot
-	info     hostinfo.Info
 	err      error
+	info     hostinfo.Info
 }
 
 // fonts is every face this screen uses, resolved once.

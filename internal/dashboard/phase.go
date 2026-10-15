@@ -34,8 +34,8 @@ func SetPhase(text string) {
 
 // Phase is what PID 1 last published, and since when.
 type Phase struct {
-	Text  string
 	Since time.Time
+	Text  string
 }
 
 // ReadPhase reads the phase file. Nothing to show -- no file, or a phase of

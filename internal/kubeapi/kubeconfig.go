@@ -14,8 +14,8 @@ import (
 
 // Client talks to one API server with one identity.
 type Client struct {
-	Server string
 	http   *http.Client
+	Server string
 }
 
 // The kubeconfig file, as far as this program reads it.

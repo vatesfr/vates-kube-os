@@ -204,13 +204,13 @@ func ioctl(fd int, request uintptr, arg unsafe.Pointer) error {
 
 // Display is the screen, with a buffer to draw in.
 type Display struct {
+	mem    []byte
 	fd     int
-	crtc   uint32
-	fb     uint32
 	width  int
 	height int
 	stride int
-	mem    []byte
+	crtc   uint32
+	fb     uint32
 }
 
 // Open takes the screen.

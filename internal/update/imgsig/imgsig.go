@@ -39,8 +39,8 @@ type Signature struct {
 
 // PublicKey is a trusted Ed25519 public key and the id derived from it.
 type PublicKey struct {
-	Key   ed25519.PublicKey
 	KeyID string
+	Key   ed25519.PublicKey
 }
 
 // NewPublicKey wraps a raw Ed25519 public key and derives its id.

@@ -11,23 +11,23 @@ import (
 // Info is one observation of the machine.
 type Info struct {
 	Hostname string
-	Uptime   time.Duration
 	CPUModel string
-	CPUs     int
-	MemTotal uint64 // bytes
-	MemUsed  uint64 // bytes
-	Procs    int
+	NTP      []string
+	DNS      []string
+
+	Gateways []string
 	Load     [3]float64
+	Procs    int
+	MemUsed  uint64 // bytes
 
 	// CPUBusy is the fraction of CPU time spent not idle between the previous
 	// observation and this one. It is only meaningful once a second sample has
 	// been taken; until then it is zero and HasCPU says so.
-	CPUBusy float64
-	HasCPU  bool
-
-	Gateways []string
-	DNS      []string
-	NTP      []string
+	CPUBusy  float64
+	MemTotal uint64 // bytes
+	CPUs     int
+	Uptime   time.Duration
+	HasCPU   bool
 }
 
 type cpuTimes struct{ busy, total uint64 }

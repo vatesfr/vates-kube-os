@@ -18,13 +18,13 @@ const trials = 3
 
 // Status is what an operator wants to know about the two slots.
 type Status struct {
+	// Entries maps each slot to the base name of its boot entry on the ESP.
+	Entries map[string]string
 	// Running is the slot the kernel was started from, "a" or "b", or "" when
 	// the command line does not name one.
 	Running string
 	// Default is the entry name loader.conf points at, boot counter included.
 	Default string
-	// Entries maps each slot to the base name of its boot entry on the ESP.
-	Entries map[string]string
 }
 
 // GetStatus reports the running slot, the default entry and both entry names.
