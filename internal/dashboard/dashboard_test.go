@@ -97,24 +97,25 @@ func TestFilterEventsKeepsTheNewestWhenTrimming(t *testing.T) {
 	}
 }
 
-func TestEventToneCalmsWhatIsExpectedWhileStarting(t *testing.T) {
+func TestEventToneCalmsExpectedBootEvents(t *testing.T) {
 	// The complaint this answers: an event that means "not yet" was drawn like a
 	// failure, so the console looked crashed while the node was coming up. The
-	// same event is a warning once the node is Ready -- an image pull that is
-	// normal at boot is a problem on a node that has been up for hours.
+	// same event is a warning when it is NOT a boot event -- an image pull that
+	// is normal at boot is a problem on a node that has been up for hours. Which
+	// event is a boot event is Snapshot.BootEvent's call; this pins the colours.
 	cases := []struct {
-		name     string
-		typ      string
-		reason   string
-		starting bool
-		want     string
+		name   string
+		typ    string
+		reason string
+		boot   bool
+		want   string
 	}{
-		{"probe while starting", "Warning", "Unhealthy", true, ToneDim},
+		{"probe while booting", "Warning", "Unhealthy", true, ToneDim},
 		{"probe once ready", "Warning", "Unhealthy", false, ToneWarn},
-		{"scheduling while starting", "Warning", "FailedScheduling", true, ToneDim},
-		{"sandbox while starting", "Warning", "FailedCreatePodSandBox", true, ToneDim},
-		{"disk capacity while starting", "Warning", "InvalidDiskCapacity", true, ToneDim},
-		{"a real warning while starting", "Warning", "CrashLoopBackOff", true, ToneWarn},
+		{"scheduling while booting", "Warning", "FailedScheduling", true, ToneDim},
+		{"sandbox while booting", "Warning", "FailedCreatePodSandBox", true, ToneDim},
+		{"disk capacity while booting", "Warning", "InvalidDiskCapacity", true, ToneDim},
+		{"a real warning while booting", "Warning", "CrashLoopBackOff", true, ToneWarn},
 		{"a real warning once ready", "Warning", "FailedScheduling", false, ToneWarn},
 		{"an error is always an error", "Error", "EventsUnavailable", true, ToneBad},
 		{"a normal event is normal", "Normal", "Started", true, ToneNone},
@@ -124,29 +125,53 @@ func TestEventToneCalmsWhatIsExpectedWhileStarting(t *testing.T) {
 			var e kubeapi.Event
 			e.Type = tc.typ
 			e.Reason = tc.reason
-			if got := EventTone(e, tc.starting); got != tc.want {
-				t.Errorf("EventTone(%s/%s, starting=%v) = %q, want %q",
-					tc.typ, tc.reason, tc.starting, got, tc.want)
+			if got := EventTone(e, tc.boot); got != tc.want {
+				t.Errorf("EventTone(%s/%s, boot=%v) = %q, want %q",
+					tc.typ, tc.reason, tc.boot, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestStartingNeedsAKnownNode(t *testing.T) {
-	// Before the kubeconfig exists the console has no node at all; that is
-	// "unknown", not "starting", and it must not be what calms a warning.
-	var s Snapshot
-	if s.Starting() {
-		t.Error("an empty snapshot claims to be starting")
+func TestBootEventCalmsOnlyTheBootsOwnEvents(t *testing.T) {
+	// The second half of the complaint: the boot's own events were drawn orange
+	// the instant the node turned Ready, because "starting" became false. A boot
+	// reason is a boot event only until the node becomes Ready; after that it is
+	// a warning again, unless it happened before the transition.
+	readyAt := time.Date(2026, 10, 15, 10, 31, 0, 0, time.UTC)
+	before := kubeapi.Event{Type: "Warning", Reason: "InvalidDiskCapacity"}
+	before.LastTimestamp = readyAt.Add(-30 * time.Second).Format(time.RFC3339)
+	after := kubeapi.Event{Type: "Warning", Reason: "Unhealthy"}
+	after.LastTimestamp = readyAt.Add(30 * time.Second).Format(time.RFC3339)
+	real := kubeapi.Event{Type: "Warning", Reason: "CrashLoopBackOff"}
+	real.LastTimestamp = readyAt.Add(-30 * time.Second).Format(time.RFC3339)
+
+	cases := []struct {
+		name string
+		snap Snapshot
+		e    kubeapi.Event
+		want bool
+	}{
+		{"unknown node is still booting", Snapshot{}, before, true},
+		{"not ready yet", Snapshot{Node: nodeNamed("vates-cp-1")}, before, true},
+		{"boot reason before Ready", Snapshot{Ready: true, ReadyAt: readyAt}, before, true},
+		{"boot reason after Ready", Snapshot{Ready: true, ReadyAt: readyAt}, after, false},
+		{"a real reason is never a boot event", Snapshot{Ready: true, ReadyAt: readyAt}, real, false},
+		{"Ready without a transition time", Snapshot{Ready: true}, before, false},
 	}
-	s.Node.Metadata.Name = "vates-cp-1"
-	if !s.Starting() {
-		t.Error("a known, not-Ready node is starting")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.snap.BootEvent(tc.e); got != tc.want {
+				t.Errorf("BootEvent(%s) = %v, want %v", tc.e.Reason, got, tc.want)
+			}
+		})
 	}
-	s.Ready = true
-	if s.Starting() {
-		t.Error("a Ready node is not starting")
-	}
+}
+
+func nodeNamed(name string) kubeapi.Node {
+	var n kubeapi.Node
+	n.Metadata.Name = name
+	return n
 }
 
 func TestPhaseParsesAndRenders(t *testing.T) {

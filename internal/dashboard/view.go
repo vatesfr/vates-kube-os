@@ -156,17 +156,39 @@ func EventKey(e kubeapi.Event) string {
 	}, "|")
 }
 
-// Starting reports whether the node is still coming up: it is known, and it has
-// not reached Ready. It is what tells an expected boot failure from a real one,
-// and it is a property of the snapshot rather than of a single event.
-func (s Snapshot) Starting() bool {
-	return s.Node.Metadata.Name != "" && !s.Ready
+// BootEvent reports whether an event is one a node emits on its way up, and is
+// therefore drawn calm rather than as a warning.
+//
+// The reason matters, but so does WHEN: a node that is not Ready is still in its
+// boot window and every expected reason is calm; once it is Ready, an expected
+// reason is calm only if it happened BEFORE the node became Ready. Without that
+// boundary the boot's own events -- the kubelet's first disk stat, a probe
+// retrying before the API answered -- kept their "not yet" reason but took the
+// colour of a live warning the moment the node turned Ready, and the console
+// looked broken seconds after it had finished starting.
+//
+// A node the console has not reached yet is not Ready either, so an expected
+// reason seen before the first collection is a boot event too. That is the
+// common case at the very start of a boot, and it is the one the previous
+// "known and not Ready" test drew as a warning.
+func (s Snapshot) BootEvent(e kubeapi.Event) bool {
+	if !expectedWhileStarting[e.Reason] {
+		return false
+	}
+	if !s.Ready {
+		return true
+	}
+	if s.ReadyAt.IsZero() {
+		return false
+	}
+	return !e.When().After(s.ReadyAt)
 }
 
 // expectedWhileStarting are the event reasons a node emits on its way up, and
 // which mean "not yet" rather than "broken". They are drawn calm while the node
-// is not Ready, and as warnings once it is: the image pull that is normal at boot
-// is a problem on a node that has been up for hours.
+// is coming up and for the events that predate it becoming Ready; the same
+// reason after that is a warning, because the image pull that is normal at boot
+// is a problem on a node that has been up for hours (see Snapshot.BootEvent).
 //
 // Every reason here was seen on a real boot: `Unhealthy` is a probe retrying
 // (kube-vip's, before the API server answers), `FailedCreatePodSandBox` and
@@ -183,14 +205,15 @@ var expectedWhileStarting = map[string]bool{
 	"FailedAttachVolume":     true,
 }
 
-// EventTone is the tone an event is drawn with, from its type and the node's
-// state. It is the one place that decides it, so the two renderers agree.
-func EventTone(e kubeapi.Event, starting bool) string {
+// EventTone is the tone an event is drawn with, from its type and whether it is
+// an expected boot event (Snapshot.BootEvent). It is the one place that decides
+// it, so the two renderers agree.
+func EventTone(e kubeapi.Event, boot bool) string {
 	switch {
 	case e.Type == eventTypeError:
 		return ToneBad
 	case e.Type == "Warning":
-		if starting && expectedWhileStarting[e.Reason] {
+		if boot && expectedWhileStarting[e.Reason] {
 			return ToneDim
 		}
 		return ToneWarn
@@ -210,8 +233,8 @@ func Timestamp(e kubeapi.Event) string {
 //
 // There is no trailing newline: a feed that lays out one layout per event has no
 // use for one, and the text view adds it.
-func EventMarkup(e kubeapi.Event, starting bool) string {
-	reasonColour := eventReasonColour[EventTone(e, starting)]
+func EventMarkup(e kubeapi.Event, boot bool) string {
+	reasonColour := eventReasonColour[EventTone(e, boot)]
 	if reasonColour == "" {
 		reasonColour = eventReasonColour[ToneNone]
 	}

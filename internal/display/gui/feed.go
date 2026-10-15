@@ -32,12 +32,17 @@ type line struct {
 }
 
 // emptyFeed is the single line shown when there is nothing to show, and why.
+//
+// A node that has never been seen is drawn calm even when a read failed: the
+// console starts with the machine, before the API answers and before the
+// kubelet has registered the node, so a failure here is the boot, not a fault.
+// The raw error is still in the footer, where it is a fact rather than an alarm.
 func (s *screen) emptyFeed() (string, uint32) {
 	switch {
+	case !s.hadNode && s.snap.Node.Metadata.Name == "":
+		return "waiting for the API server", colourWhen
 	case s.err != nil:
 		return s.err.Error(), colourOrange
-	case s.snap.Node.Metadata.Name == "":
-		return "waiting for the API server", colourWhen
 	default:
 		return "none", colourWhen
 	}
@@ -65,7 +70,7 @@ func (s *screen) buildLines() []line {
 	y := 0
 	for _, e := range tail {
 		key := dashboard.EventKey(e)
-		markup := dashboard.EventMarkup(e, s.snap.Starting())
+		markup := dashboard.EventMarkup(e, s.snap.BootEvent(e))
 		h := s.heightOf(key, markup, s.feedInnerW)
 		lines = append(lines, line{key: key, markup: markup, height: h, y: y})
 		y += h

@@ -1,12 +1,72 @@
 package kubeapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
+
+// ReadySince is the boundary the dashboard uses to keep a node's boot events
+// calm: it has to read the Ready condition's lastTransitionTime, and only when
+// the condition is actually True.
+func TestReadySinceReadsTheReadyTransition(t *testing.T) {
+	tests := []struct {
+		name       string
+		conditions string
+		wantOK     bool
+		wantTime   string
+	}{
+		{
+			name:       "ready",
+			conditions: `[{"type":"Ready","status":"True","lastTransitionTime":"2026-10-15T10:31:00Z"}]`,
+			wantOK:     true,
+			wantTime:   "2026-10-15T10:31:00Z",
+		},
+		{
+			name:       "not ready",
+			conditions: `[{"type":"Ready","status":"False","lastTransitionTime":"2026-10-15T10:29:00Z"}]`,
+			wantOK:     false,
+		},
+		{
+			name:       "no ready condition",
+			conditions: `[{"type":"MemoryPressure","status":"False","lastTransitionTime":"2026-10-15T10:29:00Z"}]`,
+			wantOK:     false,
+		},
+		{
+			name:       "ready without a transition time",
+			conditions: `[{"type":"Ready","status":"True"}]`,
+			wantOK:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var n Node
+			doc := `{"status":{"conditions":` + tt.conditions + `}}`
+			if err := json.Unmarshal([]byte(doc), &n); err != nil {
+				t.Fatalf("building the node: %v", err)
+			}
+			got, ok := n.ReadySince()
+			if ok != tt.wantOK {
+				t.Fatalf("ReadySince() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !tt.wantOK {
+				return
+			}
+			want, err := time.Parse(time.RFC3339, tt.wantTime)
+			if err != nil {
+				t.Fatalf("bad fixture: %v", err)
+			}
+			if !got.Equal(want) {
+				t.Errorf("ReadySince() = %s, want %s", got, want)
+			}
+		})
+	}
+}
 
 // The console polls these reads every couple of seconds on EVERY node, so a read
 // with no resourceVersion is a QUORUM read: the API server forwards it to etcd

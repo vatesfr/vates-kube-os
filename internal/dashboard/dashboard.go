@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/vatesfr/vates-kube-os/internal/kubeapi"
 )
@@ -16,6 +17,11 @@ type Snapshot struct {
 	// the condition list is awkward to read from a template.
 	Ready       bool
 	ReadyReason string
+
+	// ReadyAt is when the node last became Ready, and is zero when it never
+	// has (or the API did not say). It is the boundary the event feed uses to
+	// tell a boot event from one on a node that is up -- see BootEvent.
+	ReadyAt time.Time
 }
 
 // MaxEvents bounds how many events are kept. The dashboard shows a tail; the
@@ -37,6 +43,7 @@ func Collect(c *kubeapi.Client, nodeName string) (Snapshot, error) {
 	}
 	s.Node = node
 	s.Ready, s.ReadyReason = node.Ready()
+	s.ReadyAt, _ = node.ReadySince()
 
 	// The pods and the events are supplementary: losing either should cost the
 	// dashboard a panel, not the whole screen. The node itself is what must be

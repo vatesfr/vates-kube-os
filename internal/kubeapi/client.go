@@ -26,10 +26,11 @@ type Node struct {
 	} `json:"spec"`
 	Status struct {
 		Conditions []struct {
-			Type    string `json:"type"`
-			Status  string `json:"status"`
-			Reason  string `json:"reason"`
-			Message string `json:"message"`
+			Type               string `json:"type"`
+			Status             string `json:"status"`
+			Reason             string `json:"reason"`
+			Message            string `json:"message"`
+			LastTransitionTime string `json:"lastTransitionTime"`
 		} `json:"conditions"`
 		Addresses []struct {
 			Type    string `json:"type"`
@@ -73,6 +74,29 @@ func (n Node) Ready() (bool, string) {
 		return false, c.Message
 	}
 	return false, "no Ready condition"
+}
+
+// ReadySince returns when the node last became Ready, and whether it is Ready
+// at all. It is the boundary between the events a node emits on its way up and
+// the ones it emits once it is running: the dashboard keeps an expected boot
+// reason calm only while it is still in that window, and draws it as a warning
+// once the node has been up (see dashboard.BootEvent).
+//
+// The time comes from the Ready condition's lastTransitionTime, the moment the
+// status last CHANGED -- not the node's creation time, which would be the same
+// on every boot and would call a genuine warning on a long-lived node "old".
+func (n Node) ReadySince() (time.Time, bool) {
+	for _, c := range n.Status.Conditions {
+		if c.Type != "Ready" || c.Status != "True" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, c.LastTransitionTime)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return t, true
+	}
+	return time.Time{}, false
 }
 
 // Address returns the address of the given type, preferring the requested type

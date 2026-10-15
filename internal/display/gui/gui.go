@@ -86,6 +86,11 @@ type screen struct {
 	info hostinfo.Info
 	err  error
 
+	// hadNode is true once a collection has returned the node: it is how the
+	// feed tells "the machine has not come up yet" (a failure is the boot) from
+	// "the machine was up and the API stopped answering" (a failure is a fault).
+	hadNode bool
+
 	// The feed: lines laid out in content coordinates, and the offset of the
 	// panel's top within them. Which way it scrolls is the whole difference
 	// between a memory copy and a full repaint.
@@ -494,6 +499,9 @@ func (s *screen) layout() {
 // under it had moved.
 func (s *screen) apply(f frame) {
 	s.snap, s.info, s.err = f.snapshot, f.info, f.err
+	if f.snapshot.Node.Metadata.Name != "" {
+		s.hadNode = true
+	}
 	s.absorb(f.snapshot.Events)
 	s.refreshFeed()
 }

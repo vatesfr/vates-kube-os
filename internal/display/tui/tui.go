@@ -552,7 +552,16 @@ func (m Model) feed(height, inner int) string {
 	var lines []string
 	switch {
 	case len(events) == 0 && m.err != nil:
-		lines = append(lines, warnStyle.Render(truncate(m.err.Error(), inner)))
+		// The console starts with the machine: before the API answers and
+		// before the kubelet has registered the node, a read FAILS -- and that
+		// failure is the node coming up, not a fault. It is drawn calm, and the
+		// header's phase line says what is actually being waited for. Only once
+		// the cluster has answered once is a failure a failure.
+		if m.haveSnapshot() {
+			lines = append(lines, warnStyle.Render(truncate(m.err.Error(), inner)))
+		} else {
+			lines = append(lines, dimStyle.Render(truncate("waiting for the API server", inner)))
+		}
 	case len(events) == 0:
 		lines = append(lines, dimStyle.Render("none"))
 	default:
@@ -563,7 +572,7 @@ func (m Model) feed(height, inner int) string {
 		end := len(events) - off
 		start := max(0, end-height)
 		for _, e := range events[start:end] {
-			lines = append(lines, formatEvent(e, inner, m.snapshot.Starting()))
+			lines = append(lines, formatEvent(e, inner, m.snapshot.BootEvent(e)))
 		}
 	}
 
@@ -577,10 +586,12 @@ func (m Model) feed(height, inner int) string {
 	return strings.Join(lines, "\n")
 }
 
-// formatEvent renders one event as a log line.
-func formatEvent(e kubeapi.Event, inner int, starting bool) string {
+// formatEvent renders one event as a log line. boot is
+// Snapshot.BootEvent(e): an expected boot reason that belongs to the node's
+// way up is drawn calm, the same reason on a node that has been up is a warning.
+func formatEvent(e kubeapi.Event, inner int, boot bool) string {
 	style := valueStyle
-	switch dashboard.EventTone(e, starting) {
+	switch dashboard.EventTone(e, boot) {
 	case dashboard.ToneDim:
 		style = dimStyle
 	case dashboard.ToneWarn:
