@@ -17,8 +17,8 @@ func TestReadySinceReadsTheReadyTransition(t *testing.T) {
 	tests := []struct {
 		name       string
 		conditions string
-		wantOK     bool
 		wantTime   string
+		wantOK     bool
 	}{
 		{
 			name:       "ready",
@@ -76,9 +76,9 @@ func TestReadySinceReadsTheReadyTransition(t *testing.T) {
 // alone.
 func TestReadsAskForTheWatchCache(t *testing.T) {
 	tests := []struct {
+		call func(*Client) error
 		name string
 		body string
-		call func(*Client) error
 	}{
 		{
 			name: "node",

@@ -144,8 +144,7 @@ func TestKubeVIPManifestIsValidAndCorrect(t *testing.T) {
 			Namespace string `yaml:"namespace"`
 		} `yaml:"metadata"`
 		Spec struct {
-			HostNetwork bool `yaml:"hostNetwork"`
-			Containers  []struct {
+			Containers []struct {
 				Name  string   `yaml:"name"`
 				Image string   `yaml:"image"`
 				Args  []string `yaml:"args"`
@@ -167,6 +166,7 @@ func TestKubeVIPManifestIsValidAndCorrect(t *testing.T) {
 					Path string `yaml:"path"`
 				} `yaml:"hostPath"`
 			} `yaml:"volumes"`
+			HostNetwork bool `yaml:"hostNetwork"`
 		} `yaml:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &pod); err != nil {

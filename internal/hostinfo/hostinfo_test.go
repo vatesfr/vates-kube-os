@@ -80,17 +80,17 @@ func TestDetectPlatform(t *testing.T) {
 		sysVendor  string
 		product    string
 		biosVendor string
-		xenProc    bool
 		want       Platform
+		xenProc    bool
 	}{
-		{"xen via /proc/xen", "", "", "", "", true, PlatformXen},
-		{"xen via hypervisor type", "xen", "", "", "", false, PlatformXen},
-		{"xen via dmi", "", "XenServer", "HVM domU", "SeaBIOS", false, PlatformXen},
-		{"kvm via hypervisor type", "kvm", "", "", "", false, PlatformKVM},
-		{"kvm via dmi qemu", "", "QEMU", "Standard PC (Q35 + ICH9, 2009)", "SeaBIOS", false, PlatformKVM},
-		{"kvm via dmi kvm", "", "KVM", "QEMU", "SeaBIOS", false, PlatformKVM},
-		{"bare metal", "", "GenuineIntel", "My Machine", "Award Software", false, PlatformBareMetal},
-		{"unknown", "", "", "", "", false, PlatformBareMetal},
+		{name: "xen via /proc/xen", xenProc: true, want: PlatformXen},
+		{name: "xen via hypervisor type", xenType: "xen", want: PlatformXen},
+		{name: "xen via dmi", sysVendor: "XenServer", product: "HVM domU", biosVendor: "SeaBIOS", want: PlatformXen},
+		{name: "kvm via hypervisor type", xenType: "kvm", want: PlatformKVM},
+		{name: "kvm via dmi qemu", sysVendor: "QEMU", product: "Standard PC (Q35 + ICH9, 2009)", biosVendor: "SeaBIOS", want: PlatformKVM},
+		{name: "kvm via dmi kvm", sysVendor: "KVM", product: "QEMU", biosVendor: "SeaBIOS", want: PlatformKVM},
+		{name: "bare metal", sysVendor: "GenuineIntel", product: "My Machine", biosVendor: "Award Software", want: PlatformBareMetal},
+		{name: "unknown", want: PlatformBareMetal},
 	}
 	for _, c := range cases {
 		if got := detectPlatform(c.xenType, c.sysVendor, c.product, c.biosVendor, c.xenProc); got != c.want {

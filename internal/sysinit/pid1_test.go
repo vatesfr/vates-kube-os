@@ -43,15 +43,15 @@ func TestContainerdReadyMessage(t *testing.T) {
 // off, which reboots it, and which does neither.
 func TestRebootAction(t *testing.T) {
 	cases := []struct {
-		sig  syscall.Signal
 		want string
+		sig  syscall.Signal
 	}{
-		{syscall.SIGTERM, "poweroff"},
-		{syscall.SIGINT, "poweroff"},
-		{syscall.SIGPWR, "poweroff"},
-		{syscall.SIGUSR2, "reboot"},
-		{syscall.SIGCHLD, ""},
-		{syscall.SIGHUP, ""},
+		{sig: syscall.SIGTERM, want: "poweroff"},
+		{sig: syscall.SIGINT, want: "poweroff"},
+		{sig: syscall.SIGPWR, want: "poweroff"},
+		{sig: syscall.SIGUSR2, want: "reboot"},
+		{sig: syscall.SIGCHLD, want: ""},
+		{sig: syscall.SIGHUP, want: ""},
 	}
 	for _, c := range cases {
 		if got := rebootAction(c.sig); got != c.want {

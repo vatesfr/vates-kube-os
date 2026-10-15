@@ -107,18 +107,18 @@ func TestEventToneCalmsExpectedBootEvents(t *testing.T) {
 		name   string
 		typ    string
 		reason string
-		boot   bool
 		want   string
+		boot   bool
 	}{
-		{"probe while booting", "Warning", "Unhealthy", true, ToneDim},
-		{"probe once ready", "Warning", "Unhealthy", false, ToneWarn},
-		{"scheduling while booting", "Warning", "FailedScheduling", true, ToneDim},
-		{"sandbox while booting", "Warning", "FailedCreatePodSandBox", true, ToneDim},
-		{"disk capacity while booting", "Warning", "InvalidDiskCapacity", true, ToneDim},
-		{"a real warning while booting", "Warning", "CrashLoopBackOff", true, ToneWarn},
-		{"a real warning once ready", "Warning", "FailedScheduling", false, ToneWarn},
-		{"an error is always an error", "Error", "EventsUnavailable", true, ToneBad},
-		{"a normal event is normal", "Normal", "Started", true, ToneNone},
+		{name: "probe while booting", typ: "Warning", reason: "Unhealthy", boot: true, want: ToneDim},
+		{name: "probe once ready", typ: "Warning", reason: "Unhealthy", boot: false, want: ToneWarn},
+		{name: "scheduling while booting", typ: "Warning", reason: "FailedScheduling", boot: true, want: ToneDim},
+		{name: "sandbox while booting", typ: "Warning", reason: "FailedCreatePodSandBox", boot: true, want: ToneDim},
+		{name: "disk capacity while booting", typ: "Warning", reason: "InvalidDiskCapacity", boot: true, want: ToneDim},
+		{name: "a real warning while booting", typ: "Warning", reason: "CrashLoopBackOff", boot: true, want: ToneWarn},
+		{name: "a real warning once ready", typ: "Warning", reason: "FailedScheduling", boot: false, want: ToneWarn},
+		{name: "an error is always an error", typ: "Error", reason: "EventsUnavailable", boot: true, want: ToneBad},
+		{name: "a normal event is normal", typ: "Normal", reason: "Started", boot: true, want: ToneNone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

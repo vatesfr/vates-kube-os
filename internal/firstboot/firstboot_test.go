@@ -327,15 +327,15 @@ func TestFilesWritesKubeletConfigForContainerdAndCgroupfs(t *testing.T) {
 	// text, and broke as soon as a comment mentioned a removed key. A comment
 	// must not matter; a real key must.
 	var kc struct {
+		KubeReserved             map[string]string `yaml:"kubeReserved"`
+		SystemReserved           map[string]string `yaml:"systemReserved"`
 		APIVersion               string            `yaml:"apiVersion"`
 		Kind                     string            `yaml:"kind"`
 		CgroupDriver             string            `yaml:"cgroupDriver"`
 		ContainerRuntimeEndpoint string            `yaml:"containerRuntimeEndpoint"`
-		ClusterDNS               []string          `yaml:"clusterDNS"`
 		ClusterDomain            string            `yaml:"clusterDomain"`
 		StaticPodPath            string            `yaml:"staticPodPath"`
-		KubeReserved             map[string]string `yaml:"kubeReserved"`
-		SystemReserved           map[string]string `yaml:"systemReserved"`
+		ClusterDNS               []string          `yaml:"clusterDNS"`
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(f.Content))
 	dec.KnownFields(true)
@@ -734,11 +734,11 @@ func TestBootstrapPhasesOmitKubeProxyWhenTheCNIReplacesIt(t *testing.T) {
 
 // fakeRunner records what Apply does instead of doing it.
 type fakeRunner struct {
+	// failOn makes Run fail for any command whose joined form contains it.
+	failOn   string
 	dirs     []string
 	writes   []string
 	commands []string
-	// failOn makes Run fail for any command whose joined form contains it.
-	failOn string
 	// bootstrapped makes Stat report the bootstrap marker as present, as on a
 	// control plane that has already run its kubeadm phases once.
 	bootstrapped bool
@@ -1025,7 +1025,16 @@ func TestJoinConfigCarriesDiscoveryAndEndpoint(t *testing.T) {
 	}
 
 	var join struct {
-		Kind      string `yaml:"kind"`
+		ControlPlane struct {
+			LocalAPIEndpoint struct {
+				AdvertiseAddress string `yaml:"advertiseAddress"`
+			} `yaml:"localAPIEndpoint"`
+			CertificateKey string `yaml:"certificateKey"`
+		} `yaml:"controlPlane"`
+		Kind             string `yaml:"kind"`
+		NodeRegistration struct {
+			Name string `yaml:"name"`
+		} `yaml:"nodeRegistration"`
 		Discovery struct {
 			BootstrapToken struct {
 				APIServerEndpoint string   `yaml:"apiServerEndpoint"`
@@ -1033,15 +1042,6 @@ func TestJoinConfigCarriesDiscoveryAndEndpoint(t *testing.T) {
 				CACertHashes      []string `yaml:"caCertHashes"`
 			} `yaml:"bootstrapToken"`
 		} `yaml:"discovery"`
-		ControlPlane struct {
-			LocalAPIEndpoint struct {
-				AdvertiseAddress string `yaml:"advertiseAddress"`
-			} `yaml:"localAPIEndpoint"`
-			CertificateKey string `yaml:"certificateKey"`
-		} `yaml:"controlPlane"`
-		NodeRegistration struct {
-			Name string `yaml:"name"`
-		} `yaml:"nodeRegistration"`
 	}
 	if err := yaml.Unmarshal(raw, &join); err != nil {
 		t.Fatalf("generated join document does not parse: %v\n%s", err, raw)
@@ -1086,15 +1086,6 @@ func TestJoinDocumentUsesOnlyKnownFields(t *testing.T) {
 	// A typed decoding with the fields kubeadm actually accepts: anything else,
 	// anywhere, is an error. The struct mirrors JoinConfiguration's own schema.
 	var join struct {
-		APIVersion string `yaml:"apiVersion"`
-		Kind       string `yaml:"kind"`
-		Discovery  struct {
-			BootstrapToken struct {
-				APIServerEndpoint string   `yaml:"apiServerEndpoint"`
-				Token             string   `yaml:"token"`
-				CACertHashes      []string `yaml:"caCertHashes"`
-			} `yaml:"bootstrapToken"`
-		} `yaml:"discovery"`
 		ControlPlane struct {
 			LocalAPIEndpoint struct {
 				AdvertiseAddress string `yaml:"advertiseAddress"`
@@ -1106,9 +1097,18 @@ func TestJoinDocumentUsesOnlyKnownFields(t *testing.T) {
 			Name      string `yaml:"name"`
 			CRISocket string `yaml:"criSocket"`
 		} `yaml:"nodeRegistration"`
-		Patches struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
+		Patches    struct {
 			Directory string `yaml:"directory"`
 		} `yaml:"patches"`
+		Discovery struct {
+			BootstrapToken struct {
+				APIServerEndpoint string   `yaml:"apiServerEndpoint"`
+				Token             string   `yaml:"token"`
+				CACertHashes      []string `yaml:"caCertHashes"`
+			} `yaml:"bootstrapToken"`
+		} `yaml:"discovery"`
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
@@ -1124,8 +1124,8 @@ func TestKubeadmPatchesPointTheLivenessProbeAwayFromEtcd(t *testing.T) {
 	// probe off etcd, and it has to reach BOTH documents -- a joining control
 	// plane's kubeadm reads its own patches.directory.
 	tests := []struct {
-		name   string
 		render func() ([]byte, error)
+		name   string
 	}{
 		{
 			name: "bootstrapping control plane (init)",
@@ -1171,13 +1171,13 @@ func TestKubeadmPatchesPointTheLivenessProbeAwayFromEtcd(t *testing.T) {
 		} `yaml:"metadata"`
 		Spec struct {
 			Containers []struct {
-				Name          string `yaml:"name"`
-				LivenessProbe struct {
+				ReadinessProbe *struct{} `yaml:"readinessProbe"`
+				Name           string    `yaml:"name"`
+				LivenessProbe  struct {
 					HTTPGet struct {
 						Path string `yaml:"path"`
 					} `yaml:"httpGet"`
 				} `yaml:"livenessProbe"`
-				ReadinessProbe *struct{} `yaml:"readinessProbe"`
 			} `yaml:"containers"`
 		} `yaml:"spec"`
 	}

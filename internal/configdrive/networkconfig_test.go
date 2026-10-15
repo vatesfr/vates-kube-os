@@ -9,9 +9,9 @@ import (
 
 func TestParseNetworkConfig(t *testing.T) {
 	tests := []struct {
+		want    *StaticNetwork
 		name    string
 		doc     string
-		want    *StaticNetwork
 		wantErr bool
 	}{
 		{
@@ -165,9 +165,9 @@ func TestStaticNetworkFromDrive(t *testing.T) {
 	}
 
 	tests := []struct {
-		name  string
 		files map[string]string
 		want  *StaticNetwork
+		name  string
 	}{
 		{
 			name:  "a drive without a network-config asks for nothing",
