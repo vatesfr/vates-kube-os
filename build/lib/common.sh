@@ -56,23 +56,40 @@ pin_field() { pin_line "$1" | cut -d'|' -f"$2"; }
 # --- fetch / unpack ---------------------------------------------------------
 
 # fetch NAME -> prints the path of the verified tarball.
+#
+# The pin's url is the upstream one; its optional mirror field (the 6th, a
+# space-separated list) is tried, in order, only when the upstream fails or
+# serves something the sha256 rejects. Both must serve the same artifact: the
+# hash is what makes a mirror trustworthy, not the mirror's name. The mirrors
+# matter because some upstreams are single flaky hosts -- dri.freedesktop.org.
 fetch() {
-	local name="$1" source sha url dest
+	local name="$1" source sha url mirror dest u
 	source=$(pin_field "$name" 3)
 	sha=$(pin_field "$name" 4)
 	url=$(pin_field "$name" 5)
+	mirror=$(pin_field "$name" 6)
 	dest="${DL}/${source}"
 	if [ ! -f "${dest}" ]; then
-		echo ">> fetching ${source}" >&2
 		mkdir -p "${DL}"
-		# Same guards as build.sh's fetch: fail fast on a dead or
-		# stalled mirror instead of hanging the layer.
-		curl -fL --retry 3 --connect-timeout 20 \
-			--speed-limit 1024 --speed-time 60 \
-			-o "${dest}.part" "${url}"
-		mv "${dest}.part" "${dest}"
+		for u in ${url} ${mirror}; do
+			echo ">> fetching ${source} from ${u}" >&2
+			# Same guards as build.sh's fetch: fail fast on a dead or
+			# stalled mirror instead of hanging the layer.
+			if curl -fL --retry 3 --connect-timeout 20 \
+				--speed-limit 1024 --speed-time 60 \
+				-o "${dest}.part" "${u}" \
+				&& mv "${dest}.part" "${dest}"; then
+				break
+			fi
+			echo ">> ${u} failed for ${source}; trying the next source" >&2
+			rm -f "${dest}.part"
+		done
 	fi
-	echo "${sha}  ${dest}" | sha256sum -c --quiet -
+	if ! echo "${sha}  ${dest}" | sha256sum -c --quiet -; then
+		echo ">> ${source} does not match its pin; no source served it" >&2
+		rm -f "${dest}"
+		return 1
+	fi
 	echo "${dest}"
 }
 

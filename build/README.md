@@ -97,17 +97,20 @@ docker build -f Containerfile --target console \
 ## The pins
 
 `pins.conf` lists each component's version, source tarball, sha256 and **upstream
-URL**. It is maintained by hand — there is no generator reading another project's
-metadata. To add or bump a component, edit the file; the sha256 comes from the
-upstream release (its checksum or signature file) or from `sha256sum` of a
-tarball verified some other way.
+URL**, plus an optional space-separated list of **mirrors** tried only when the
+upstream fails or serves a file the sha256 rejects. It is maintained by hand —
+there is no generator reading another project's metadata. To add or bump a
+component, edit the file; the sha256 comes from the upstream release (its
+checksum or signature file) or from `sha256sum` of a tarball verified some other
+way. A mirror may name the file differently; the sha256 is what makes it the
+same artifact, and it is checked either way.
 
 ## Layout
 
 ```text
 build.sh              podman/docker driver; fetches+verifies sources, builds a stage
 Containerfile         the passes, as stages
-pins.conf             maintained: version|source|sha256|url per component
+pins.conf             maintained: version|source|sha256|url[|mirrors] per component
 board/                our kernel and busybox fragments (self-contained copy)
 overlay/              what goes into the rootfs (our config)
 lib/common.sh         native env + fetch/verify/unpack + autotools/meson drivers

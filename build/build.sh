@@ -33,24 +33,44 @@ BASE="${VATES_SCRATCH_BASE:-registry.fedoraproject.org/fedora:44}"
 DL="${HERE}/dl"
 IMAGE="${VATES_SCRATCH_IMAGE:-localhost/vates-scratch}"
 
+# download URL DEST -- one attempt, with the guard rails a build host needs.
+# --connect-timeout: a dead host must fail, not hang the build.
+# --speed-limit/--speed-time: a stalled transfer aborts, and fetch tries the
+# next source (or the next run starts over).
+download() {
+	curl -fL --retry 3 --connect-timeout 20 \
+		--speed-limit 1024 --speed-time 60 \
+		-o "$2" "$1"
+}
+
+# fetch NAME VERSION SOURCE SHA URL [MIRRORS] -- stage SOURCE into ${DL}.
+#
+# URL is the upstream one; MIRRORS (space-separated, the optional 6th field of
+# pins.conf) are tried, in order, only when the upstream fails or serves
+# something the sha256 rejects. Some upstreams are single, flaky hosts --
+# dri.freedesktop.org, measured -- and a build that depends on one of them fails
+# for reasons that have nothing to do with this project. Every source must serve
+# the SAME artifact: the sha256 is what makes a mirror trustworthy, not the
+# mirror's name.
 fetch() {
-	local name="$1" version="$2" source="$3" sha="$4" url="$5" dest
+	local name="$1" version="$2" source="$3" sha="$4" url="$5" mirror="${6:-}" dest u
 	dest="${DL}/${source}"
-	if [ ! -f "${dest}" ]; then
-		echo "  fetching ${source}"
-		# --connect-timeout: a dead host must fail, not hang the build.
-		# --speed-limit/--speed-time: a stalled transfer aborts and the
-		# retries above (or the next run) start over.
-		curl -fL --retry 3 --connect-timeout 20 \
-			--speed-limit 1024 --speed-time 60 \
-			-o "${dest}.part" "${url}"
-		mv "${dest}.part" "${dest}"
+	if [ -f "${dest}" ] && echo "${sha}  ${dest}" | sha256sum -c --quiet -; then
+		return 0
 	fi
-	if ! echo "${sha}  ${dest}" | sha256sum -c --quiet -; then
-		echo "  sha256 mismatch for ${source}" >&2
-		rm -f "${dest}"
-		exit 1
-	fi
+	rm -f "${dest}"
+	for u in ${url} ${mirror}; do
+		echo "  fetching ${source} from ${u}"
+		if download "${u}" "${dest}.part" \
+			&& mv "${dest}.part" "${dest}" \
+			&& echo "${sha}  ${dest}" | sha256sum -c --quiet -; then
+			return 0
+		fi
+		echo "  ${u} did not give a usable ${source}; trying the next source" >&2
+		rm -f "${dest}" "${dest}.part"
+	done
+	echo "  no source served ${source} (url: ${url}, mirrors: ${mirror:-none})" >&2
+	exit 1
 }
 
 # One build at a time. Two concurrent runs share ${DL} and ${LOG}: they would
@@ -65,9 +85,9 @@ fi
 
 echo "=== staging and verifying sources into ${DL} ==="
 mkdir -p "${DL}"
-while IFS='|' read -r name version source sha url; do
+while IFS='|' read -r name version source sha url mirror; do
 	case "${name}" in \#*|"") continue ;; esac
-	fetch "${name}" "${version}" "${source}" "${sha}" "${url}"
+	fetch "${name}" "${version}" "${source}" "${sha}" "${url}" "${mirror}"
 done < "${HERE}/pins.conf"
 
 # The image's own content -- the vates binaries, the overlay, the node's /etc and
