@@ -22,12 +22,37 @@ networking:
   dnsDomain: {{.DNSDomain}}
 {{- if .ImageRepository}}
 imageRepository: {{.ImageRepository}}
-etcd:
-  local:
-    imageRepository: {{.ImageRepository}}
 dns:
   imageRepository: {{.ImageRepository}}
 {{- end}}
+# etcd local, tuned for the shared/slow storage these machines boot on.
+#
+# kubeadm's default --snapshot-count=10000 takes a full database snapshot every
+# 10000 entries. Under load (a conformance run) that is a few seconds of writes,
+# and a follower that lags past the compacted index is sent the WHOLE database
+# (measured: a 4 MB snapshot took 30 s to send). Those bursts stall the raft loop
+# long enough that the leader misses its heartbeats ("leader failed to send out
+# heartbeat on time", up to ~790 ms) and the cluster holds elections, which the
+# API server reports as `leader changed` / 503 on /readyz. 100000 is etcd's own
+# default and makes the snapshots rare instead of constant.
+#
+# heartbeat-interval/election-timeout are raised together for the same reason:
+# an election timeout that fires on a transient I/O stall removes a healthy
+# member. 250 ms / 2500 ms tolerates the measured ~800 ms stalls while still
+# detecting a real failure in a couple of seconds. Election timeout must stay
+# well above the heartbeat interval (etcd recommends 10x).
+etcd:
+  local:
+    {{- if .ImageRepository}}
+    imageRepository: {{.ImageRepository}}
+    {{- end}}
+    extraArgs:
+      - name: heartbeat-interval
+        value: "250"
+      - name: election-timeout
+        value: "2500"
+      - name: snapshot-count
+        value: "100000"
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

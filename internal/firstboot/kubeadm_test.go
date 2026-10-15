@@ -28,6 +28,14 @@ type kubeadmDoc struct {
 	Networking           struct {
 		PodSubnet string `yaml:"podSubnet"`
 	} `yaml:"networking"`
+	Etcd struct {
+		Local struct {
+			ExtraArgs []struct {
+				Name  string `yaml:"name"`
+				Value string `yaml:"value"`
+			} `yaml:"extraArgs"`
+		} `yaml:"local"`
+	} `yaml:"etcd"`
 }
 
 func parseKubeadmDocs(t *testing.T, raw []byte) []kubeadmDoc {
@@ -97,6 +105,29 @@ func TestKubeadmConfigIsValidAndCorrect(t *testing.T) {
 
 	if docs[2].Kind != "KubeletConfiguration" {
 		t.Errorf("third document kind = %q, want KubeletConfiguration", docs[2].Kind)
+	}
+
+	// etcd is tuned for the slow, shared storage: rarer snapshots and a timing
+	// that survives the I/O stalls measured on a real cluster. Dropping one of
+	// these silently returns to the snapshot storms and the leader elections.
+	got := map[string]string{}
+	for _, a := range cluster.Etcd.Local.ExtraArgs {
+		got[a.Name] = a.Value
+	}
+	args := []struct {
+		name string
+		want string
+	}{
+		{"heartbeat-interval", "250"},
+		{"election-timeout", "2500"},
+		{"snapshot-count", "100000"},
+	}
+	for _, a := range args {
+		t.Run("etcd extraArg "+a.name, func(t *testing.T) {
+			if got[a.name] != a.want {
+				t.Errorf("etcd.local.extraArgs[%s] = %q, want %q", a.name, got[a.name], a.want)
+			}
+		})
 	}
 }
 
