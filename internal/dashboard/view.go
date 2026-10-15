@@ -209,10 +209,10 @@ var expectedWhileStarting = map[string]bool{
 // an expected boot event (Snapshot.BootEvent). It is the one place that decides
 // it, so the two renderers agree.
 func EventTone(e kubeapi.Event, boot bool) string {
-	switch {
-	case e.Type == eventTypeError:
+	switch e.Type {
+	case eventTypeError:
 		return ToneBad
-	case e.Type == "Warning":
+	case "Warning":
 		if boot && expectedWhileStarting[e.Reason] {
 			return ToneDim
 		}
