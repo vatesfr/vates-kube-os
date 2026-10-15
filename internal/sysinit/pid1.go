@@ -129,10 +129,8 @@ func Pid1(_ []string) error {
 	} else {
 		// The kubelet, started a few steps below, talks to the CRI on this
 		// socket, and its own static pods are containers containerd runs, so the
-		// socket has to be there before it starts. Measured on XCP-ng: containerd
-		// outran the network bring-up, which cost the whole control plane (see
-		// waitContainerd).
-		waitContainerd(30 * time.Second)
+		// CRI has to be READY to serve before it starts -- not merely listening
+		// (see waitContainerd).
 		waitContainerd(30 * time.Second)
 		bootStep("containerd", "ok")
 	}
@@ -734,30 +732,83 @@ func setHostname() {
 	_ = syscall.Sethostname([]byte(name))
 }
 
-// waitContainerd blocks until the containerd socket exists, or gives up. It is
-// a dependency wait, not a delay: it returns as soon as the socket appears, and
-// only a runtime that never comes up pays the timeout.
+// containerdNotifySocket is where PID 1 listens for containerd's systemd-style
+// readiness notification.
 //
-// Measured on XCP-ng: containerd can be slower to listen than the network
-// bring-up that follows it, and PID 1 used ctr before it was ready --
+// containerd is a `Type=notify` service: under systemd it sends READY=1 once
+// every plugin -- the CRI and its snapshotter included -- has loaded, and
+// systemd starts the kubelet only after that. This image runs no systemd, so
+// PID 1 offers the socket and waits for the same message (see waitContainerd).
+const containerdNotifySocket = "/run/vates/notify"
+
+// containerdReady is set once containerd has announced READY=1.
+var containerdReady atomic.Bool
+
+// containerdNotifyConn is the readiness socket, or nil when it could not be
+// created -- the wait then falls back to the CRI socket existing. It is written
+// by startContainerd, before the goroutine that reads it runs.
+var containerdNotifyConn *net.UnixConn
+
+// containerdReadyMessage reports whether a systemd notification datagram is the
+// readiness one. sd_notify sends newline-separated KEY=VALUE lines; containerd
+// sends "READY=1" when it has finished starting.
+func containerdReadyMessage(msg []byte) bool {
+	for line := range strings.SplitSeq(string(msg), "\n") {
+		if line == "READY=1" {
+			return true
+		}
+	}
+	return false
+}
+
+// listenContainerdReadiness flags the first READY=1 and then stops: the only
+// question is whether containerd has finished starting.
+func listenContainerdReadiness(conn *net.UnixConn) {
+	defer func() { _ = conn.Close() }()
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		if containerdReadyMessage(buf[:n]) {
+			containerdReady.Store(true)
+			return
+		}
+	}
+}
+
+// waitContainerd blocks until containerd is READY TO SERVE, not merely
+// listening: it waits for the READY=1 notification containerd sends when every
+// plugin, the CRI included, has loaded (see containerdNotifySocket).
 //
-//	ctr: cannot access socket /run/containerd/containerd.sock
+// It is a dependency wait, not a delay: it returns as soon as the notification
+// arrives, and only a runtime that never announces pays the timeout.
 //
-// configure then failed its kubelet-image check and never ran the kubeadm
-// phases (certs, kubeconfig, etcd, control-plane), so
-// /etc/kubernetes/pki/ca.crt and the static-pod manifests were never written:
-// the kubelet died on the missing CA, and bootstrap waited for an API server
-// that could never start. The wait is what makes the control plane's boot not a
-// race.
+// The socket alone was the earlier criterion, and it was measured to be too
+// weak in two ways. configure's kubelet-image check runs `ctr` before the
+// kubeadm phases; a socket that exists but is not yet serving failed it with
+// "cannot access socket", the phases never ran, no CA and no static-pod
+// manifests were written, and bootstrap waited for an API server that could
+// never start. And the kubelet's first image garbage collection, started on a
+// socket that is listening but whose plugins are not up, reads a capacity of 0
+// on the image filesystem and records a one-shot `InvalidDiskCapacity` event.
+//
+// When the readiness socket could not be created, it falls back to the CRI
+// socket existing, which is all a daemon without the notification can offer.
 func waitContainerd(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for {
-		if _, err := os.Stat(pid1ContainerdSocket); err == nil {
+		if containerdReady.Load() {
 			return
 		}
+		if containerdNotifyConn == nil {
+			if _, err := os.Stat(pid1ContainerdSocket); err == nil {
+				return
+			}
+		}
 		if !time.Now().Before(deadline) {
-			kmsg("containerd: no socket at %s after %s; continuing without it",
-				pid1ContainerdSocket, timeout)
+			kmsg("containerd: not ready after %s; continuing without it", timeout)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -767,11 +818,35 @@ func waitContainerd(timeout time.Duration) {
 // startContainerd launches the container runtime. It is not re-started here on
 // exit: a runtime that dies is a bug worth seeing, and the reap loop reports
 // it. Starting it before the console means the console can show CRI state.
+//
+// The readiness socket is created first and named to containerd through
+// NOTIFY_SOCKET, so waitContainerd waits for the daemon to say it is ready
+// rather than only for its socket to appear.
 func startContainerd() error {
 	if _, err := os.Stat(pid1Containerd); err != nil {
 		return err
 	}
-	return startChild("containerd", pid1Containerd, "--config", pid1ContainerdConf)
+	return startChildEnv("containerd", containerdEnviron(), pid1Containerd, "--config", pid1ContainerdConf)
+}
+
+// containerdEnviron creates the readiness socket and returns containerd's
+// environment, or nil (the inherited environment) when the socket could not be
+// created: a machine that cannot offer the notification keeps the weaker
+// wait instead of refusing to boot.
+func containerdEnviron() []string {
+	if err := os.MkdirAll(filepath.Dir(containerdNotifySocket), 0o755); err != nil {
+		kmsg("containerd: readiness socket: %v", err)
+		return nil
+	}
+	_ = os.Remove(containerdNotifySocket)
+	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: containerdNotifySocket, Net: "unixgram"})
+	if err != nil {
+		kmsg("containerd: readiness socket: %v", err)
+		return nil
+	}
+	containerdNotifyConn = conn
+	go listenContainerdReadiness(conn)
+	return append(os.Environ(), "NOTIFY_SOCKET="+containerdNotifySocket)
 }
 
 // setConsoleLoglevel sets what reaches the consoles. The sysctl takes four
@@ -1183,7 +1258,17 @@ func childLog(name string) *os.File {
 // Wait4(-1) racing a Cmd.Wait on the same pid makes one of them fail with
 // ECHILD ("waitid: no child processes").
 func startChild(name, path string, args ...string) error {
+	return startChildEnv(name, nil, path, args...)
+}
+
+// startChildEnv is startChild with a chosen environment for the child. nil
+// means "inherit PID 1's", which is every child but containerd: containerd has
+// to be TOLD the readiness socket's address through NOTIFY_SOCKET, and handing
+// that variable to the kubelet or the console as well would be a fact about the
+// manager leaking into children that have nothing to do with it.
+func startChildEnv(name string, env []string, path string, args ...string) error {
 	cmd := exec.Command(path, args...)
+	cmd.Env = env
 	log := childLog(name)
 	cmd.Stdout = log
 	cmd.Stderr = log

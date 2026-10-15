@@ -10,6 +10,35 @@ import (
 	"github.com/vatesfr/vates-kube-os/internal/firstboot"
 )
 
+// TestContainerdReadyMessage pins what counts as containerd announcing it is
+// ready. PID 1 uses it to start the kubelet only once the CRI can serve -- the
+// fix for the one-shot InvalidDiskCapacity event on a fresh boot -- so a
+// message that is not exactly READY=1 must not be mistaken for it.
+func TestContainerdReadyMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"ready alone", "READY=1", true},
+		{"ready with a trailing newline", "READY=1\n", true},
+		{"a status before ready", "STATUS=booting\nREADY=1\n", true},
+		{"a status after ready", "READY=1\nSTATUS=serving\n", true},
+		{"a status only", "STATUS=starting", false},
+		{"watchdog is not readiness", "WATCHDOG=1", false},
+		{"not ready", "READY=0", false},
+		{"ready with trailing text", "READY=1x", false},
+		{"empty", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := containerdReadyMessage([]byte(c.msg)); got != c.want {
+				t.Errorf("containerdReadyMessage(%q) = %v, want %v", c.msg, got, c.want)
+			}
+		})
+	}
+}
+
 // TestRebootAction pins the shutdown policy: which signal powers the machine
 // off, which reboots it, and which does neither.
 func TestRebootAction(t *testing.T) {
