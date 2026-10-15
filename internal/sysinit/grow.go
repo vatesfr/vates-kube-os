@@ -75,29 +75,60 @@ func mountVar() {
 	// THROUGH the symlink: a dangling symlink is not a directory, so
 	// `MkdirAll /etc/kubernetes/pki` fails at its first component.
 	for _, d := range varRuntimeDirs {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			kmsg("var: mkdir %s: %v", d, err)
+		if err := os.MkdirAll(d.path, d.mode); err != nil {
+			kmsg("var: mkdir %s: %v", d.path, err)
+			continue
+		}
+		// MkdirAll leaves an EXISTING directory's mode alone, and the umask
+		// applies to one it creates, so the mode is set explicitly -- /var/tmp
+		// has to be world-writable whatever the ambient umask is.
+		if err := os.Chmod(d.path, d.mode); err != nil {
+			kmsg("var: chmod %s: %v", d.path, err)
 		}
 	}
 }
 
-// varRuntimeDirs are the /var directories the image's runtime-written symlinks
-// resolve into. The symlinks live in the image; these are their targets, and
-// they must exist on the mounted /var before anything runs. The /etc ones carry
-// the node's own state; the last is the target of /usr/libexec/kubernetes.
+// varRuntimeDir is one directory the mounted /var partition must carry, and the
+// mode it must have.
+type varRuntimeDir struct {
+	path string
+	mode os.FileMode
+}
+
+// varRuntimeDirs are the /var directories the image expects, recreated on the
+// mounted partition, every boot.
+//
+// They exist because the vates-var partition is formatted EMPTY (genimage): the
+// root filesystem's /var -- its skeleton and everything assemble.sh put under
+// it -- is hidden the moment /var is mounted, and only what is listed here comes
+// back. Two kinds:
+//
+//   - the standard skeleton the rootfs carried (/var/tmp, /var/log, /var/cache,
+//     /var/lib). /var/tmp is the one a real node was missing: the image creates
+//     it 1777, the empty partition does not have it, and a pod with a hostPath
+//     on /var/tmp sat in ContainerCreating with "does not exist". Note 1777 is
+//     os.ModeSticky | 0o777, NOT the literal 0o1777: Go's FileMode keeps the
+//     sticky bit in a high flag, and 0o1000 is not a permission bit there.
+//   - the targets of the image's runtime-written symlinks (/etc/... and
+//     /usr/libexec/... point into /var/lib/vates): a dangling symlink is not a
+//     directory, so `MkdirAll /etc/kubernetes/pki` fails at its first component.
 //
 // The last one is load-bearing for the controller manager: kubeadm's static pod
 // declares /usr/libexec/kubernetes/kubelet-plugins/volume/exec as a
 // DirectoryOrCreate hostPath, so containerd mkdirs it on the HOST before the
 // container starts. On the read-only root that mkdir fails with EROFS and
 // kube-controller-manager never leaves CreateContainerError.
-var varRuntimeDirs = []string{
-	"/var/lib/vates/etc",
-	"/var/lib/vates/etc/kubernetes",
-	"/var/lib/vates/etc/kubelet",
-	"/var/lib/vates/etc/vates",
-	"/var/lib/vates/etc/systemd",
-	"/var/lib/vates/usr/libexec/kubernetes/kubelet-plugins/volume/exec",
+var varRuntimeDirs = []varRuntimeDir{
+	{"/var/tmp", 0o777 | os.ModeSticky},
+	{"/var/log", 0o755},
+	{"/var/cache", 0o755},
+	{"/var/lib", 0o755},
+	{"/var/lib/vates/etc", 0o755},
+	{"/var/lib/vates/etc/kubernetes", 0o755},
+	{"/var/lib/vates/etc/kubelet", 0o755},
+	{"/var/lib/vates/etc/vates", 0o755},
+	{"/var/lib/vates/etc/systemd", 0o755},
+	{"/var/lib/vates/usr/libexec/kubernetes/kubelet-plugins/volume/exec", 0o755},
 }
 
 // byLabel resolves a filesystem label to its device without udev. blkid is in
