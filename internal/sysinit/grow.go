@@ -88,12 +88,13 @@ func mountVar() {
 	}
 
 	// /var/run -> /run: the standard link, recreated on the mounted /var at
-	// every boot. It is a link and not a directory because the CNI plugins are
-	// compiled with /var/run paths -- Cilium's cilium-cni dials
-	// /var/run/cilium/cilium.sock -- while the agent's cilium-run hostPath is
-	// /run/cilium, the tmpfs. Through the link the plugin's compiled path
-	// reaches the socket the agent listens on. Without it, the path is a
-	// directory that does not exist, and every pod's sandbox fails with
+	// every boot. It matters here because CNI plugins are compiled with
+	// /var/run paths while their agents' sockets live on the tmpfs /run: through
+	// the link, a plugin's compiled path reaches the socket its agent listens
+	// on. Cilium's cilium-cni, for instance, dials /var/run/cilium/cilium.sock
+	// while the agent's cilium-run hostPath is /run/cilium. Without the link,
+	// that path is a directory that does not exist, and every pod's sandbox
+	// fails with
 	// "dial unix /var/run/cilium/cilium.sock: no such file or directory"
 	// while the node stays Ready (the kubelet is happy as soon as a conflist
 	// exists; only the plugin's first dial proves the socket is reachable).

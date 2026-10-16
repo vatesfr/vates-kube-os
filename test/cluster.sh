@@ -247,7 +247,7 @@ write_drive() {
 
   # The CNI the node installs itself, stated in its document (cni.plugin
   # below). Both are applied by the node at bootstrap -- see
-  # internal/firstboot -- and both run alongside kube-proxy, so nothing else
+  # internal/cni -- and both run alongside kube-proxy, so nothing else
   # in the document changes.
 
   local doc

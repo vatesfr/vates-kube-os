@@ -21,7 +21,7 @@ CONN="qemu:///system"
 WORK="${WORK:-/var/tmp/vates-os/cluster}"
 CLUSTER="${CLUSTER:-vates-test}"
 KUBECONFIG_LOCAL="${WORK}/kubeconfig"
-# The same Cilium the image embeds (internal/firstboot/cilium.go): a retrofit
+# The same Cilium the image embeds (internal/cni/cilium.go): a retrofit
 # that installed a different release would leave two versions of the CNI in the
 # cluster, and the operator and agent must agree.
 CILIUM_VERSION="${CILIUM_VERSION:-1.20.1}"
