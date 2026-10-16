@@ -1,14 +1,16 @@
 #!/bin/bash
-# Install Cilium on a running Vates Kube OS test cluster.
+# Install Cilium on a running Vates Kube OS test cluster whose nodes did not
+# install a CNI (cni.plugin: none) or that ran flannel.
 #
-# The node installs flannel itself; Cilium replaces it. This script removes
-# flannel (and, when the replacement is on, kube-proxy) and applies the Cilium
-# chart, then waits for the agent to come up. It is what `make cilium` runs, and
-# what `make cluster CNI=cilium` calls once the bootstrap control plane's API
-# answers.
+# This is a MANUAL retrofit tool: it removes flannel (and, when the
+# replacement is on, kube-proxy) and applies the Cilium chart from the host,
+# then waits for the agent to come up. A cluster that wants Cilium from the
+# start selects it in the node document (cni.plugin: cilium) and the image
+# installs it at bootstrap with no host involvement -- this script is for the
+# other direction, adding Cilium to a cluster that came up without it.
 #
-#   test/cilium.sh                 # on vates-cp-1, replacing kube-proxy
-#   test/cilium.sh vates-cp-2      # a specific node to talk to
+#   make cilium                                # on vates-cp-1, replacing kube-proxy
+#   test/cilium.sh vates-cp-2                  # a specific node to talk to
 #   KUBE_PROXY_REPLACEMENT=false test/cilium.sh   # keep kube-proxy
 #
 # Cilium runs through its container image, so the node needs no rebuild for it:
@@ -19,7 +21,10 @@ CONN="qemu:///system"
 WORK="${WORK:-/var/tmp/vates-os/cluster}"
 CLUSTER="${CLUSTER:-vates-test}"
 KUBECONFIG_LOCAL="${WORK}/kubeconfig"
-CILIUM_VERSION="${CILIUM_VERSION:-1.18.0}"
+# The same Cilium the image embeds (internal/firstboot/cilium.go): a retrofit
+# that installed a different release would leave two versions of the CNI in the
+# cluster, and the operator and agent must agree.
+CILIUM_VERSION="${CILIUM_VERSION:-1.20.1}"
 # Cilium's kube-proxy replacement needs the API address before its own Service
 # handling exists; the node's own address is always reachable and is an API
 # endpoint, so it is used rather than the VIP (which kube-vip owns and which

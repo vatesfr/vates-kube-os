@@ -236,9 +236,9 @@ func (c *Config) DashboardModeValue() DashboardMode {
 //   - Kubernetes' own images are selected by kubeadm through imageRepository, a
 //     single base under which kube-apiserver, etcd and CoreDNS are found. That
 //     is kubeadm's own mechanism, not ours, and it is what this uses.
-//   - Everything else (flannel, kube-vip, the pause image in containerd's
-//     configuration) is referenced by us, host and path included, and is
-//     rewritten by the mirrors below.
+//   - Everything else (flannel, cilium, kube-vip, the pause image in
+//     containerd's configuration) is referenced by us, host and path included,
+//     and is rewritten by the mirrors below.
 //
 // Both empty means the public registries, which is today's behaviour.
 type Registry struct {
@@ -397,19 +397,27 @@ const (
 
 // CNI selects the pod network.
 type CNI struct {
-	// Plugin is the CNI implementation. "flannel" is installed by the node;
-	// "none" means the cluster's CNI is the operator's to install, and the node
-	// writes none. Anything else is rejected rather than accepted and ignored.
-	Plugin string `yaml:"plugin"`
+	// Plugin is the CNI implementation. Optional; defaults to "flannel", so a
+	// document that omits it behaves exactly as one that states it. "flannel"
+	// and "cilium" are installed by the node; "none" means the cluster's CNI is
+	// the operator's to install, and the node writes none. Anything else is
+	// rejected rather than accepted and ignored.
+	Plugin string `yaml:"plugin,omitempty"`
 	// CIDR is the pod network, e.g. "10.244.0.0/16". Required.
+	//
+	// It is the pod network for WHICHEVER plugin is chosen: flannel is told the
+	// range directly, and cilium reads it from the node's podCIDR annotation,
+	// which kubeadm writes from the same value as the cluster's podSubnet. One
+	// field, one pod network -- there is no second copy to keep in agreement.
 	CIDR string `yaml:"cidr"`
 }
 
-// The cni.plugin values the schema accepts. "flannel" is the one the node
-// installs itself; "none" leaves the CNI to the operator, which is how a CNI
-// that replaces kube-proxy (Cilium) is installed.
+// The cni.plugin values the schema accepts. "flannel" is the default and is
+// installed by the node, as is "cilium"; "none" leaves the CNI to the operator,
+// which is how a CNI that replaces kube-proxy is installed.
 const (
 	CNIFlannel = "flannel"
+	CNICilium  = "cilium"
 	CNINone    = "none"
 )
 
@@ -728,21 +736,29 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("network.mode %q is not one of dhcp, static", c.Network.Mode)
 	}
 
+	// The pod network defaults to flannel: a document that omits cni.plugin is
+	// the common case and must behave exactly as one that states it. The value
+	// is defaulted here, in one place, so every check below -- and every
+	// consumer of a loaded Config -- sees the effective value.
+	if c.CNI.Plugin == "" {
+		c.CNI.Plugin = CNIFlannel
+	}
 	switch c.CNI.Plugin {
-	case "":
-		return fmt.Errorf("cni.plugin is required")
-	case CNIFlannel, CNINone:
+	case CNIFlannel, CNICilium, CNINone:
 	default:
-		return fmt.Errorf("cni.plugin %q is not supported (flannel, or none to install the CNI from the cluster side)", c.CNI.Plugin)
+		return fmt.Errorf("cni.plugin %q is not supported (flannel, cilium, or none to install the CNI from the cluster side)", c.CNI.Plugin)
 	}
 	if c.CNI.CIDR == "" {
 		return fmt.Errorf("cni.cidr is required")
 	}
-	// kube-proxy is kubeadm's Service implementation. flannel does not replace
-	// it, so omitting it there is a cluster whose Services silently do nothing --
-	// refused together rather than discovered as a Service that never connects.
+	// kube-proxy is kubeadm's Service implementation. Neither flannel nor
+	// cilium -- as installed here, the agent providing the pod network and
+	// kube-proxy the Services, side by side -- replaces it, so disabling
+	// kube-proxy there is a cluster whose Services silently do nothing.
+	// Refused together rather than discovered later as a Service that never
+	// connects.
 	if c.Cluster.Proxy.Disabled && c.CNI.Plugin != CNINone {
-		return fmt.Errorf("cluster.proxy.disabled requires cni.plugin: none (flannel does not replace kube-proxy)")
+		return fmt.Errorf("cluster.proxy.disabled requires cni.plugin: none (flannel and cilium, as installed here, do not replace kube-proxy)")
 	}
 
 	// A mirror rule is only useful if it can be applied. A half-written rule

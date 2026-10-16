@@ -32,3 +32,45 @@ jobs:
 
       - name: Build every binary
         run: go build ./...
+
+  kind:
+    permissions:
+      contents: read
+    name: CNI on kind (${{ matrix.cni }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cni: [flannel, cilium]
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KUBECTL_VERSION: v1.37.1
+      KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install kind and kubectl
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          cd "${RUNNER_TEMP}/bin"
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          printf '%s  kind\n%s  kubectl\n' "${KIND_SHA256}" "${KUBECTL_SHA256}" | sha256sum -c -
+          chmod +x kind kubectl
+          echo "${RUNNER_TEMP}/bin" >>"${GITHUB_PATH}"
+
+      # The nodes share the runner's kernel; the OS loads these at boot.
+      - name: Load the kernel modules
+        run: sudo modprobe -a nf_conntrack br_netfilter overlay
+
+      - name: Run test/kind.sh
+        run: make kind CNI=${{ matrix.cni }}

@@ -65,7 +65,7 @@ flowchart TD
     cp --> sched["kube-scheduler"]
     cp --> vip["kube-vip — the virtual IP"]
 
-    net --> flannel["flannel"]
+    net --> cni["pod network<br/>flannel or cilium"]
     net --> kproxy["kube-proxy"]
 ```
 
@@ -114,7 +114,7 @@ flowchart TD
 | `kubelet` | the node agent | PID 1 (host process) |
 | `etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler` | control plane | kubelet (static pods) |
 | `kube-vip` | holds the control plane's virtual address | kubelet (static pod) |
-| `flannel` / `kube-proxy` | pod network and Service rules | kubelet |
+| `flannel` or `cilium`, and `kube-proxy` | pod network and Service rules | kubelet |
 | `vates-sysinit` | PID 1, the boot sequence | the kernel |
 | `vates-launcher` | fetch, verify and run a Kubernetes binary | the kubelet, kubeadm and kubectl (on the host) |
 | `vates-api` | the management API | PID 1 |
@@ -159,7 +159,7 @@ network:
   mode: dhcp                  # dhcp or static
 
 cni:
-  plugin: flannel
+  plugin: flannel             # flannel (default) | cilium | none
   cidr: "10.244.0.0/16"
 
 dashboard:
@@ -172,6 +172,15 @@ fallback a hand-built drive uses. The document can also carry the **PKI**
 (`pki.clusterCA` for the cluster authority, `pki.apiCA` for the management API),
 which is how a provider that owns the CA hands it to a node with no file channel;
 a bootstrapping control plane then **reuses** that CA instead of generating one.
+
+`cni.plugin` selects the pod network the node installs at bootstrap: `flannel`
+(the default, stated or not) and `cilium` (the agent and its operator, pinned
+like every other component). Both are embedded manifests applied by the node
+itself, both run alongside kube-proxy, and `cni.cidr` is the one field the pod
+network reads — flannel from its own manifest, cilium from the node's podCIDR
+annotation, which kubeadm writes from the same value. `none` installs nothing:
+the CNI then comes from the cluster side, and the node stays NotReady until it
+does.
 Optional blocks (`registry`, `binaries`, `api`, `cloud`, `time`) cover air-gapped
 clusters and a few deployment choices; the schema is in
 [`vatescfg/config.go`](../vatescfg/config.go).
