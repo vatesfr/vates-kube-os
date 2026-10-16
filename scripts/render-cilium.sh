@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regenerate the embedded Cilium manifest, internal/firstboot/templates/cilium.yaml.tmpl,
+# Regenerate the embedded Cilium manifest, internal/cni/templates/cilium.yaml.tmpl,
 # from the official chart.
 #
 # The manifest is the chart's output with the settings a node needs; every one
@@ -10,22 +10,22 @@
 #
 # Two things are not chart values and are done after the render:
 #   - the two images become {{.AgentImage}} and {{.OperatorImage}}, so the node
-#     can pass them through the registry mirrors (internal/firstboot/cilium.go);
+#     can pass them through the registry mirrors (internal/cni/cilium.go);
 #   - the netns hostPath moves from /var/run/netns to /run/netns, beside the
 #     agent's runPath.
 # The helm labels, the `# Source:` lines and trailing blanks are dropped, so the
 # file reads as an artifact of the OS rather than as a helm release.
 #
 # The image references the chart pins are printed at the end: they go, tag AND
-# digest, into internal/firstboot/cilium.go.
+# digest, into internal/cni/cilium.go.
 #
 #   scripts/render-cilium.sh                        # the version below
 #   CILIUM_VERSION=1.20.2 scripts/render-cilium.sh  # a bump
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMPL="${ROOT}/internal/firstboot/templates/cilium.yaml.tmpl"
-# Keep in step with the images in internal/firstboot/cilium.go and the
+TMPL="${ROOT}/internal/cni/templates/cilium.yaml.tmpl"
+# Keep in step with the images in internal/cni/cilium.go and the
 # retrofit in test/cilium.sh.
 CILIUM_VERSION="${CILIUM_VERSION:-1.20.1}"
 
@@ -99,5 +99,5 @@ fi
 mv "${TMPL}.new" "${TMPL}"
 
 echo "rendered Cilium ${CILIUM_VERSION} into ${TMPL#"${ROOT}/"}"
-echo "the chart pins (internal/firstboot/cilium.go):"
+echo "the chart pins (internal/cni/cilium.go):"
 sed 's/^/  /' <<<"${images}"

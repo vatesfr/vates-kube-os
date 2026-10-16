@@ -78,7 +78,7 @@ func selinuxState(r Runner) SELinuxState {
 // withheld. Without these two, the node stays NotReady with "cni plugin not
 // initialized" and no pod anywhere in the cluster can start.
 //
-// The pod network's runtime state under /run, always (see CNIRunDirs): the
+// The pod network's runtime state under /run, always (see cniRunDirs): the
 // directories are the CNI's, so they are labelled with the CNI. flanneld writes
 // the pod network's subnet file into /run/flannel, and the CNI plugin on the
 // host reads it to configure every pod's sandbox. Labelled container_var_run_t,
@@ -116,8 +116,8 @@ func ContainerPaths(cfg *vatescfg.Config) []string {
 		BinariesDir,
 	}
 	// The pod network's runtime state is the CNI's, so a node labels only what
-	// its own CNI writes (see CNIRunDirs).
-	paths = append(paths, CNIRunDirs(cfg.CNI.Plugin)...)
+	// its own CNI writes (see cni.Plugin.RunDirs).
+	paths = append(paths, cniRunDirs(cfg)...)
 	if cfg.Role == vatescfg.RoleMaster {
 		paths = append(paths, EtcdDataDir)
 	}

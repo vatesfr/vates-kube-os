@@ -1,4 +1,4 @@
-package firstboot
+package cni
 
 import "github.com/vatesfr/vates-kube-os/vatescfg"
 
@@ -23,15 +23,35 @@ const (
 	CiliumOperatorImage = "quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"
 )
 
-// CiliumManifest renders the Cilium agent DaemonSet, the operator and their
-// RBAC.
+// cilium is the pod network that brings its own policy engine, and the one that
+// needs state of its own under /run. Here it runs alongside kube-proxy, not in
+// place of it: kubeProxyReplacement is off.
+type cilium struct{}
+
+// cilium implements Plugin.
+var _ Plugin = (*cilium)(nil)
+
+func (*cilium) Name() string { return vatescfg.CNICilium }
+
+func (*cilium) ManifestPath() string { return CiliumManifestPath }
+
+// ReplacesKubeProxy: Cilium is rendered with kubeProxyReplacement off (see the
+// template header), so kube-proxy stays and implements Services.
+func (*cilium) ReplacesKubeProxy() bool { return false }
+
+// RunDirs: the agent keeps its state under /run/cilium, and the pod network
+// namespaces at /run/netns.
+func (*cilium) RunDirs() []string { return []string{"/run/cilium", "/run/netns"} }
+
+// Manifest renders the Cilium agent DaemonSet, the operator and their RBAC.
 //
-// The manifest is the Cilium v1.20.1 chart (scripts/render-cilium.sh), embedded in the binary rather than
-// fetched when a node first comes up: it is an artifact of the OS image, and a
-// control plane has to be able to start with no outbound access. It is rendered
-// with the settings a node needs, stated at the top of the template: the pod
-// network comes from ipam.mode kubernetes, kube-proxy is NOT replaced, and
-// hubble, the external envoy and the gateway API are off.
+// The manifest is the Cilium v1.20.1 chart (scripts/render-cilium.sh), embedded
+// in the binary rather than fetched when a node first comes up: it is an
+// artifact of the OS image, and a control plane has to be able to start with no
+// outbound access. It is rendered with the settings a node needs, stated at the
+// top of the template: the pod network comes from ipam.mode kubernetes,
+// kube-proxy is NOT replaced, and hubble, the external envoy and the gateway API
+// are off.
 //
 // Nothing here is templated except the two images, because the pod network is
 // not: Cilium reads it from the node's podCIDR annotation, which kubeadm writes
@@ -42,7 +62,7 @@ const (
 // The image references pass through the configured mirrors, so a cluster that
 // pulls from a local registry pulls Cilium from there too. Without a mirror
 // configured this is the identity, and the manifest is the chart's output.
-func CiliumManifest(cfg *vatescfg.Config) ([]byte, error) {
+func (*cilium) Manifest(cfg *vatescfg.Config) ([]byte, error) {
 	return render("cilium.yaml.tmpl", struct {
 		AgentImage    string
 		OperatorImage string

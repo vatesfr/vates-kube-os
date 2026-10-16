@@ -38,10 +38,11 @@ type pid1Mount struct {
 var pid1Mounts = []pid1Mount{
 	{"proc", "/proc", "proc", 0, ""},
 	{"sysfs", "/sys", "sysfs", 0, ""},
-	// bpffs, for Cilium. Its agent pins its BPF maps and programs under
-	// /sys/fs/bpf, and it expects the filesystem to be there: without it the
-	// agent's first pin fails. A distribution mounts it at boot (systemd does);
-	// with `vates` as PID 1, PID 1 does.
+	// bpffs, for the pod network. A CNI agent that pins its BPF maps and
+	// programs under /sys/fs/bpf expects the filesystem to be there: without it
+	// the agent's first pin fails. It is mounted unconditionally, whichever pod
+	// network runs, so no CNI has to bring its own mount. A distribution mounts
+	// it at boot (systemd does); with `vates` as PID 1, PID 1 does.
 	{"bpf", "/sys/fs/bpf", "bpf", 0, "mode=0700"},
 	{"devtmpfs", "/dev", "devtmpfs", syscall.MS_NOSUID, "mode=0755"},
 	{"devpts", "/dev/pts", "devpts", 0, "mode=0620,ptmxmode=0666"},

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/internal/configdrive"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
@@ -64,17 +65,20 @@ var BootstrapPhases = []string{
 // leaves its iptables rules behind, which is why the choice is made here and not
 // by a cleanup step.
 //
-// Only cni.plugin: none reaches that branch: the flannel and cilium the node
-// installs itself both run alongside kube-proxy, and Validate refuses the
-// other combinations (see the proxy.disabled check).
+// Whether the CNI replaces kube-proxy is the CNI's to say (see cni.Plugin):
+// flannel and cilium, as installed here, both run alongside it, so only
+// cni.plugin: none reaches the branch -- the operator then installs a
+// replacement from the cluster side. A config that never went through Validate
+// resolves no plugin and keeps the safe default: the addons are applied whole.
 func bootstrapPhases(cfg *vatescfg.Config) []string {
-	if !cfg.Cluster.Proxy.Disabled {
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !cfg.Cluster.Proxy.Disabled || !ok || !p.ReplacesKubeProxy() {
 		return BootstrapPhases
 	}
 	phases := make([]string, 0, len(BootstrapPhases))
-	for _, p := range BootstrapPhases {
-		if p != "addon all" {
-			phases = append(phases, p)
+	for _, phase := range BootstrapPhases {
+		if phase != "addon all" {
+			phases = append(phases, phase)
 		}
 	}
 	return append(phases, "addon coredns")
@@ -89,26 +93,20 @@ func bootstrapPhases(cfg *vatescfg.Config) []string {
 // operator's to install from the cluster side, and the node writes nothing, so
 // the path comes back empty and the caller says so out loud.
 //
-// Both manifests are embedded and pinned -- see FlannelManifest and
-// CiliumManifest -- and the pod network they are told is the same field,
-// cni.cidr: flannel is given the range directly, and cilium reads it from the
-// node's podCIDR annotation, which kubeadm writes from it.
+// The plugin owns its manifest and path (see internal/cni): both are embedded
+// and pinned, and the pod network they are told is the same field, cni.cidr --
+// flannel is given the range directly, and cilium reads it from the node's
+// podCIDR annotation, which kubeadm writes from it.
 func cniManifest(cfg *vatescfg.Config) (path string, manifest []byte, err error) {
-	switch cfg.CNI.Plugin {
-	case vatescfg.CNIFlannel:
-		manifest, err = FlannelManifest(cfg)
-		return FlannelManifestPath, manifest, err
-	case vatescfg.CNICilium:
-		manifest, err = CiliumManifest(cfg)
-		return CiliumManifestPath, manifest, err
-	case vatescfg.CNINone:
-		return "", nil, nil
-	default:
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok {
 		// Validate refuses anything else and defaults the empty value, so this
 		// is a Config that was never validated. Installing nothing would leave
 		// the node NotReady with no word as to why.
 		return "", nil, fmt.Errorf("cni.plugin %q is not one the node installs", cfg.CNI.Plugin)
 	}
+	manifest, err = p.Manifest(cfg)
+	return p.ManifestPath(), manifest, err
 }
 
 // JoinAttempts is how many times a control plane's join is retried.

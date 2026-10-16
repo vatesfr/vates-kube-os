@@ -180,7 +180,9 @@ itself, both run alongside kube-proxy, and `cni.cidr` is the one field the pod
 network reads — flannel from its own manifest, cilium from the node's podCIDR
 annotation, which kubeadm writes from the same value. `none` installs nothing:
 the CNI then comes from the cluster side, and the node stays NotReady until it
-does.
+does. Each pod network is a plugin in `internal/cni` — its manifest, where it is
+written and the runtime directories its agent needs — resolved from one
+registry, so a new one is added there rather than wired through the boot code.
 Optional blocks (`registry`, `binaries`, `api`, `cloud`, `time`) cover air-gapped
 clusters and a few deployment choices; the schema is in
 [`vatescfg/config.go`](../vatescfg/config.go).

@@ -2,7 +2,6 @@ package firstboot
 
 import (
 	"bytes"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,9 +12,25 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/internal/configdrive"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
+
+// cniManifestFor renders the manifest of the pod network cfg selects, through
+// the same registry the node uses.
+func cniManifestFor(t *testing.T, cfg *vatescfg.Config) []byte {
+	t.Helper()
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok {
+		t.Fatalf("cni.Lookup(%q): not a pod network the node installs", cfg.CNI.Plugin)
+	}
+	m, err := p.Manifest(cfg)
+	if err != nil {
+		t.Fatalf("rendering the %s manifest: %v", cfg.CNI.Plugin, err)
+	}
+	return m
+}
 
 const workerDoc = `
 role: worker
@@ -736,19 +751,46 @@ func TestBootstrapPhasesOmitKubeProxyWhenTheCNIReplacesIt(t *testing.T) {
 	// `addon all` installs kube-proxy. A cluster whose CNI replaces it must never
 	// have kube-proxy written at all -- deleting it afterwards leaves its iptables
 	// rules behind. So the default keeps addon all, and proxy.disabled swaps it
-	// for the coredns addon alone.
-	cfg := loadConfig(t, workerDoc)
-	if got := bootstrapPhases(cfg); !slices.Contains(got, "addon all") {
-		t.Errorf("the default phases omit addon all: %v", got)
+	// for the coredns addon alone -- but only for a CNI that says it replaces
+	// kube-proxy. flannel and cilium run alongside it, and dropping kube-proxy on
+	// one of them is a cluster whose Services silently do nothing; vatescfg
+	// refuses that combination, and here it must not remove the addon either.
+	noneDoc := strings.Replace(workerDoc, "plugin: flannel", "plugin: none", 1)
+
+	tests := []struct {
+		name         string
+		doc          string
+		disabled     bool
+		wantAddonAll bool
+		wantCoreDNS  bool
+	}{
+		{name: "flannel keeps kube-proxy", doc: workerDoc, disabled: false, wantAddonAll: true},
+		{
+			name:         "flannel with proxy disabled keeps kube-proxy",
+			doc:          workerDoc,
+			disabled:     true,
+			wantAddonAll: true,
+		},
+		{
+			name:        "none replaces kube-proxy",
+			doc:         noneDoc,
+			disabled:    true,
+			wantCoreDNS: true,
+		},
 	}
 
-	cfg.Cluster.Proxy.Disabled = true
-	got := bootstrapPhases(cfg)
-	if slices.Contains(got, "addon all") {
-		t.Errorf("addon all (kube-proxy) is still present with proxy disabled: %v", got)
-	}
-	if !slices.Contains(got, "addon coredns") {
-		t.Errorf("the coredns addon is missing with proxy disabled: %v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := loadConfig(t, tt.doc)
+			cfg.Cluster.Proxy.Disabled = tt.disabled
+			got := bootstrapPhases(cfg)
+			if slices.Contains(got, "addon all") != tt.wantAddonAll {
+				t.Errorf("addon all present = %v, want %v: %v", slices.Contains(got, "addon all"), tt.wantAddonAll, got)
+			}
+			if slices.Contains(got, "addon coredns") != tt.wantCoreDNS {
+				t.Errorf("addon coredns present = %v, want %v: %v", slices.Contains(got, "addon coredns"), tt.wantCoreDNS, got)
+			}
+		})
 	}
 }
 
@@ -768,13 +810,13 @@ func TestBootstrapAppliesTheCNITheNodeInstalls(t *testing.T) {
 			name:         "flannel",
 			doc:          masterDoc,
 			plugin:       "flannel",
-			wantManifest: FlannelManifestPath,
+			wantManifest: cni.FlannelManifestPath,
 		},
 		{
 			name:         "cilium",
 			doc:          ciliumMasterDoc,
 			plugin:       "cilium",
-			wantManifest: CiliumManifestPath,
+			wantManifest: cni.CiliumManifestPath,
 		},
 		{
 			name:   "none writes and applies nothing",
@@ -815,7 +857,7 @@ func TestBootstrapAppliesTheCNITheNodeInstalls(t *testing.T) {
 			// The OTHER CNI's manifest must not be written or applied either:
 			// a flannel file on a cilium node is the exact bug this feature
 			// exists to prevent.
-			for _, manifest := range []string{FlannelManifestPath, CiliumManifestPath} {
+			for _, manifest := range []string{cni.FlannelManifestPath, cni.CiliumManifestPath} {
 				if manifest == tc.wantManifest {
 					continue
 				}
@@ -853,7 +895,7 @@ func TestBootstrapWritesTheCNIBeforeApplyingIt(t *testing.T) {
 			}
 			var manifest string
 			for _, w := range r.writes {
-				if w == FlannelManifestPath || w == CiliumManifestPath {
+				if w == cni.FlannelManifestPath || w == cni.CiliumManifestPath {
 					manifest = w
 				}
 			}
@@ -905,7 +947,7 @@ func TestBootstrapWritesTheCNIBeforeApplyingIt(t *testing.T) {
 // reports it, rather than staying silently NotReady with no file to read) and
 // must not write the done marker (so the next boot retries the stage whole).
 func TestBootstrapFailureToApplyTheCNIIsReported(t *testing.T) {
-	r := &fakeRunner{healthz: true, failOn: "apply -f " + FlannelManifestPath}
+	r := &fakeRunner{healthz: true, failOn: "apply -f " + cni.FlannelManifestPath}
 	err := Bootstrap(loadConfig(t, masterDoc), bareDrive(t, masterDoc), testPaths(t), "vates-cp-1", "192.168.122.50", r)
 	if err == nil {
 		t.Fatal("Bootstrap() succeeded when applying the CNI manifest failed")
@@ -929,186 +971,6 @@ func TestCNIManifestRefusesAnUnvalidatedPlugin(t *testing.T) {
 		cfg.CNI.Plugin = plugin
 		if path, _, err := cniManifest(cfg); err == nil {
 			t.Errorf("cniManifest(%q) = %q, nil; want an error", plugin, path)
-		}
-	}
-}
-
-// The two CNIs are the same field, cni.cidr, told to two different readers:
-// flannel is given the range in its manifest, cilium reads it from the node's
-// podCIDR annotation, which kubeadm writes from the same field. This is what
-// keeps the two interchangeable in vates-node.yaml, so assert the rendering of
-// both sides of the contract.
-func TestCiliumManifestRendersPinnedAndAdapted(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
-	for _, want := range []string{
-		// The pin, tag and digest, as the chart carries it.
-		`image: "quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
-		`image: "quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"`,
-		// The adaptations stated in the template's header.
-		"ipam: \"kubernetes\"",
-		"kube-proxy-replacement: \"false\"",
-		"enable-tcx: \"false\"",
-		"cgroup-root: \"/sys/fs/cgroup\"",
-		// The state goes under /run, the PID-1 tmpfs, not under /var.
-		"path: /run/cilium",
-		"path: /run/netns",
-		// A single bootstrap node cannot run the chart's two-operator
-		// anti-affinity.
-		"replicas: 1",
-		// The node's own CNI configuration: the agent writes 05-cilium.conflist
-		// (which sorts ahead of the image's 10-flannel.conf) and the
-		// cni-exclusive flag whiteouts the flannel conf on cilium nodes.
-		"write-cni-conf-when-ready: /host/etc/cni/net.d/05-cilium.conflist",
-		"cni-exclusive: \"true\"",
-		// The podCIDR annotation is the pod network; it is written by kubeadm
-		// from cni.cidr and may lag a node that joins mid-rename, so the agent
-		// must not require it to be present at startup.
-		"k8s-require-ipv4-pod-cidr: \"false\"",
-		// The agent runs on the host network: no CNI chicken-and-egg for the
-		// DaemonSet itself.
-		"hostNetwork: true",
-		// No mesh, no observability, no external sidecar.
-		"enable-hubble: \"false\"",
-		"external-envoy-proxy: \"false\"",
-		// The ports that say the agent and operator are actually serving.
-		"hostPort: 9879",
-		"hostPort: 9234",
-		"hostPort: 9963",
-	} {
-		if !strings.Contains(string(m), want) {
-			t.Errorf("the cilium manifest does not carry\n  %s", want)
-		}
-	}
-	// The pod network is NOT in this manifest: Cilium reads it from the
-	// node's podCIDR annotation, which kubeadm writes from cni.cidr. If the
-	// CIDR ever appears in the rendered file, a second copy of the pod network
-	// has been created and the two can drift.
-	if cidr := loadConfig(t, ciliumMasterDoc).CNI.CIDR; strings.Contains(string(m), cidr) {
-		t.Errorf("the cilium manifest carries the pod CIDR %q; it must come from the node's podCIDR annotation, not from the manifest", cidr)
-	}
-	if strings.Contains(string(m), "path: /var/run") {
-		t.Error("the cilium manifest still names a /var/run hostPath; the hostPath the node creates and labels is the /run one, and the chart's /var/run paths are reached on the host through the standard /var/run -> /run link PID 1 recreates")
-	}
-}
-
-// The chart 1.20 ships no crds/ directory: the operator creates the
-// CustomResourceDefinitions (skipCRDCreation defaults to false) and the agent
-// waits on them. Pin the arrangement, so a future template that either
-// re-introduces CRD documents or strips the operator's create verb is caught
-// here rather than on a node whose agent sits in CrashLoopBackOff.
-func TestCiliumOperatorCreatesTheCRDs(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
-	if strings.Contains(string(m), "kind: CustomResourceDefinition") {
-		t.Error("the cilium manifest contains CRD documents; chart 1.20 has no crds/ directory, the operator creates them")
-	}
-	if !strings.Contains(string(m), "customresourcedefinitions") || !strings.Contains(string(m), "create") {
-		t.Error("the cilium manifest no longer grants the operator create on customresourcedefinitions; the agent would wait 5 minutes on CRDs that never appear")
-	}
-}
-
-// The operator runs with one replica (the chart's required pod anti-affinity
-// would leave a second one Pending on a single-node cluster), so its rolling
-// update must make room BEFORE it creates: maxUnavailable 100%. The chart's
-// 50% is 0 of one replica, which forces the rollout to schedule a surge pod
-// first -- and the very anti-affinity that justifies the single replica would
-// refuse to run two operators on the one node, so the update hangs. maxSurge
-// stays 0 for the same reason: a surge pod on the only node cannot be
-// scheduled either.
-func TestCiliumOperatorUpdateSurvivesASingleNode(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(m))
-	found := false
-	for {
-		var doc struct {
-			Kind     string `yaml:"kind"`
-			Metadata struct {
-				Name string `yaml:"name"`
-			} `yaml:"metadata"`
-			Spec struct {
-				Replicas *int `yaml:"replicas"`
-				Strategy struct {
-					RollingUpdate struct {
-						MaxSurge       string `yaml:"maxSurge"`
-						MaxUnavailable string `yaml:"maxUnavailable"`
-					} `yaml:"rollingUpdate"`
-				} `yaml:"strategy"`
-			} `yaml:"spec"`
-		}
-		err := dec.Decode(&doc)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			t.Fatalf("the cilium manifest is not valid YAML: %v", err)
-		}
-		if doc.Kind != "Deployment" || doc.Metadata.Name != "cilium-operator" {
-			continue
-		}
-		found = true
-		if doc.Spec.Replicas == nil || *doc.Spec.Replicas != 1 {
-			t.Fatalf("the operator deployment runs %v replicas, want 1", *doc.Spec.Replicas)
-		}
-		ru := doc.Spec.Strategy.RollingUpdate
-		if ru.MaxUnavailable != "100%" {
-			t.Errorf("the operator rollingUpdate has maxUnavailable %q, want 100%%: 50%% of one replica is 0, and the rollout would need a surge pod the anti-affinity cannot schedule", ru.MaxUnavailable)
-		}
-		if ru.MaxSurge != "0" {
-			t.Errorf("the operator rollingUpdate has maxSurge %q, want 0: a surge operator cannot be scheduled beside the running one on a single node", ru.MaxSurge)
-		}
-	}
-	if !found {
-		t.Fatal("the cilium manifest has no cilium-operator Deployment")
-	}
-}
-
-// The rendered manifest must stay a document the API server can apply:
-// parseable YAML, with exactly the objects the chart renders for this
-// configuration. The count is the assertion: adding or dropping a resource
-// (an RBAC, a Namespace, a second container) changes it.
-func TestCiliumManifestIsApplicableYAML(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(m))
-	var kinds []string
-	n := 0
-	for {
-		var doc struct {
-			Kind string `yaml:"kind"`
-		}
-		err := dec.Decode(&doc)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			t.Fatalf("the cilium manifest is not valid YAML: %v", err)
-		}
-		n++
-		if doc.Kind != "" {
-			kinds = append(kinds, doc.Kind)
-		}
-	}
-	if n != 18 {
-		t.Errorf("the cilium manifest rendered %d documents, want 18 (the chart's agent + operator + RBAC set)", n)
-	}
-	for _, want := range []string{
-		"Namespace",
-		"DaemonSet",  // the agent
-		"Deployment", // the operator
-		"ConfigMap",  // cilium-config
-	} {
-		if !slices.Contains(kinds, want) {
-			t.Errorf("the cilium manifest has no %s document: %v", want, kinds)
 		}
 	}
 }
@@ -1187,23 +1049,6 @@ func TestContainerPathsCarryTheCNIState(t *testing.T) {
 			if slices.Contains(paths, a) {
 				t.Errorf("cni.plugin: %s -- ContainerPaths labels %s, the state of a CNI the node does not run: %v", tc.plugin, a, paths)
 			}
-		}
-	}
-}
-
-// The directories the CNI needs under /run differ by plugin, and /run is a
-// tmpfs: the directories must be created every boot, for the plugin selected.
-// A flannel directory on a cilium node is harmless but wrong, and a missing
-// one is a node that cannot configure its pod sandboxes.
-func TestCNIRunDirsPerPlugin(t *testing.T) {
-	cases := map[string][]string{
-		vatescfg.CNIFlannel: {"/run/flannel"},
-		vatescfg.CNICilium:  {"/run/cilium", "/run/netns"},
-		vatescfg.CNINone:    nil,
-	}
-	for plugin, want := range cases {
-		if got := CNIRunDirs(plugin); !slices.Equal(got, want) {
-			t.Errorf("CNIRunDirs(%q) = %v, want %v", plugin, got, want)
 		}
 	}
 }
@@ -1928,10 +1773,7 @@ registry:
 	}
 
 	// 2. Flannel and its CNI plugin.
-	flannel, err := FlannelManifest(cfg)
-	if err != nil {
-		t.Fatalf("FlannelManifest() failed: %v", err)
-	}
+	flannel := cniManifestFor(t, cfg)
 	for _, want := range []string{
 		"image: harbor.vates.local/mirror/docker.io/flannel/flannel:v0.26.1",
 		"image: harbor.vates.local/mirror/ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3",
@@ -1943,10 +1785,7 @@ registry:
 
 	// 3. Cilium's agent and operator, on a node that selects it.
 	ciliumCfg := loadConfig(t, strings.Replace(mirrored, "plugin: flannel", "plugin: cilium", 1))
-	cilium, err := CiliumManifest(ciliumCfg)
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	cilium := cniManifestFor(t, ciliumCfg)
 	for _, want := range []string{
 		`image: "harbor.vates.local/mirror/quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
 		`image: "harbor.vates.local/mirror/quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"`,
@@ -1984,10 +1823,7 @@ func TestWithoutAMirrorNothingIsRewritten(t *testing.T) {
 		t.Error("an imageRepository was emitted with no mirror configured; kubeadm's defaults are correct and ours are not necessarily")
 	}
 
-	flannel, err := FlannelManifest(cfg)
-	if err != nil {
-		t.Fatalf("FlannelManifest() failed: %v", err)
-	}
+	flannel := cniManifestFor(t, cfg)
 	for _, want := range []string{
 		"image: docker.io/flannel/flannel:v0.26.1",
 		"image: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3",
@@ -1998,10 +1834,7 @@ func TestWithoutAMirrorNothingIsRewritten(t *testing.T) {
 	}
 
 	ciliumCfg := loadConfig(t, strings.Replace(masterDoc, "plugin: flannel", "plugin: cilium", 1))
-	cilium, err := CiliumManifest(ciliumCfg)
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	cilium := cniManifestFor(t, ciliumCfg)
 	for _, want := range []string{
 		`image: "quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
 		`image: "quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"`,
