@@ -31,6 +31,10 @@ func (*flannel) Name() string { return vatescfg.CNIFlannel }
 
 func (*flannel) ManifestPath() string { return FlannelManifestPath }
 
+// ReplacesKubeProxy: flanneld handles the pod network, kube-proxy handles
+// Services. Neither can do the other's job, so both run.
+func (*flannel) ReplacesKubeProxy() bool { return false }
+
 // RunDirs: flanneld writes the pod network's subnet file into /run/flannel, and
 // the CNI plugin on the host reads it back to configure every pod's sandbox.
 func (*flannel) RunDirs() []string { return []string{"/run/flannel"} }

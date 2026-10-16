@@ -65,17 +65,20 @@ var BootstrapPhases = []string{
 // leaves its iptables rules behind, which is why the choice is made here and not
 // by a cleanup step.
 //
-// Only cni.plugin: none reaches that branch: the flannel and cilium the node
-// installs itself both run alongside kube-proxy, and Validate refuses the
-// other combinations (see the proxy.disabled check).
+// Whether the CNI replaces kube-proxy is the CNI's to say (see cni.Plugin):
+// flannel and cilium, as installed here, both run alongside it, so only
+// cni.plugin: none reaches the branch -- the operator then installs a
+// replacement from the cluster side. A config that never went through Validate
+// resolves no plugin and keeps the safe default: the addons are applied whole.
 func bootstrapPhases(cfg *vatescfg.Config) []string {
-	if !cfg.Cluster.Proxy.Disabled {
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !cfg.Cluster.Proxy.Disabled || !ok || !p.ReplacesKubeProxy() {
 		return BootstrapPhases
 	}
 	phases := make([]string, 0, len(BootstrapPhases))
-	for _, p := range BootstrapPhases {
-		if p != "addon all" {
-			phases = append(phases, p)
+	for _, phase := range BootstrapPhases {
+		if phase != "addon all" {
+			phases = append(phases, phase)
 		}
 	}
 	return append(phases, "addon coredns")

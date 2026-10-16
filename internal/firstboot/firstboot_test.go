@@ -752,19 +752,46 @@ func TestBootstrapPhasesOmitKubeProxyWhenTheCNIReplacesIt(t *testing.T) {
 	// `addon all` installs kube-proxy. A cluster whose CNI replaces it must never
 	// have kube-proxy written at all -- deleting it afterwards leaves its iptables
 	// rules behind. So the default keeps addon all, and proxy.disabled swaps it
-	// for the coredns addon alone.
-	cfg := loadConfig(t, workerDoc)
-	if got := bootstrapPhases(cfg); !slices.Contains(got, "addon all") {
-		t.Errorf("the default phases omit addon all: %v", got)
+	// for the coredns addon alone -- but only for a CNI that says it replaces
+	// kube-proxy. flannel and cilium run alongside it, and dropping kube-proxy on
+	// one of them is a cluster whose Services silently do nothing; vatescfg
+	// refuses that combination, and here it must not remove the addon either.
+	noneDoc := strings.Replace(workerDoc, "plugin: flannel", "plugin: none", 1)
+
+	tests := []struct {
+		name         string
+		doc          string
+		disabled     bool
+		wantAddonAll bool
+		wantCoreDNS  bool
+	}{
+		{name: "flannel keeps kube-proxy", doc: workerDoc, disabled: false, wantAddonAll: true},
+		{
+			name:         "flannel with proxy disabled keeps kube-proxy",
+			doc:          workerDoc,
+			disabled:     true,
+			wantAddonAll: true,
+		},
+		{
+			name:        "none replaces kube-proxy",
+			doc:         noneDoc,
+			disabled:    true,
+			wantCoreDNS: true,
+		},
 	}
 
-	cfg.Cluster.Proxy.Disabled = true
-	got := bootstrapPhases(cfg)
-	if slices.Contains(got, "addon all") {
-		t.Errorf("addon all (kube-proxy) is still present with proxy disabled: %v", got)
-	}
-	if !slices.Contains(got, "addon coredns") {
-		t.Errorf("the coredns addon is missing with proxy disabled: %v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := loadConfig(t, tt.doc)
+			cfg.Cluster.Proxy.Disabled = tt.disabled
+			got := bootstrapPhases(cfg)
+			if slices.Contains(got, "addon all") != tt.wantAddonAll {
+				t.Errorf("addon all present = %v, want %v: %v", slices.Contains(got, "addon all"), tt.wantAddonAll, got)
+			}
+			if slices.Contains(got, "addon coredns") != tt.wantCoreDNS {
+				t.Errorf("addon coredns present = %v, want %v: %v", slices.Contains(got, "addon coredns"), tt.wantCoreDNS, got)
+			}
+		})
 	}
 }
 

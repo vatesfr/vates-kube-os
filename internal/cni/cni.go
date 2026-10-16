@@ -1,12 +1,13 @@
 // Package cni holds the pod networks the node knows how to install itself.
 //
 // A pod network -- the cni.plugin field of vates-node.yaml -- is more than a
-// manifest. The same choice also decides where that manifest is written and
-// which runtime directories under /run its agent needs. Each of those used to
-// be a case in a switch somewhere in firstboot, with flannel as the implicit
-// default behind a `default:` label. They are now a Plugin, resolved through
-// Lookup: adding a pod network is a file here and one line in the registry, and
-// nothing else in the system names a CNI.
+// manifest. The same choice also decides where that manifest is written, which
+// runtime directories under /run its agent needs, and whether it implements
+// Services itself. Each of those used to be a case in a switch somewhere in
+// firstboot, with flannel as the implicit default behind a `default:` label.
+// They are now a Plugin, resolved through Lookup: adding a pod network is a
+// file here and one line in the registry, and nothing else in the system names
+// a CNI.
 package cni
 
 import "github.com/vatesfr/vates-kube-os/vatescfg"
@@ -41,6 +42,14 @@ type Plugin interface {
 	// Nil when the plugin needs none. A directory listed here is also labelled
 	// for containers, so it must be the plugin's own state and not another's.
 	RunDirs() []string
+
+	// ReplacesKubeProxy reports whether the plugin implements Services itself.
+	//
+	// When true, kube-proxy must not be installed at all: deleting it afterwards
+	// leaves its iptables rules behind. flannel and cilium, as installed here,
+	// both run alongside kube-proxy and report false; none reports true, because
+	// the operator then installs a CNI that does implement Services.
+	ReplacesKubeProxy() bool
 }
 
 // registry is the one place a cni.plugin value is matched to its pod network.

@@ -96,3 +96,29 @@ func TestNoneInstallsNothing(t *testing.T) {
 		t.Errorf("none.Manifest() = (%v, %v), want (nil, nil)", m, err)
 	}
 }
+
+// Only the pod network that implements Services itself may have kube-proxy left
+// out: flannel and cilium, as installed here, run alongside it, and none stands
+// for the operator's replacement.
+func TestReplacesKubeProxy(t *testing.T) {
+	tests := []struct {
+		plugin string
+		want   bool
+	}{
+		{plugin: vatescfg.CNIFlannel, want: false},
+		{plugin: vatescfg.CNICilium, want: false},
+		{plugin: vatescfg.CNINone, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.plugin, func(t *testing.T) {
+			p, ok := Lookup(tt.plugin)
+			if !ok {
+				t.Fatalf("Lookup(%q) failed", tt.plugin)
+			}
+			if got := p.ReplacesKubeProxy(); got != tt.want {
+				t.Errorf("ReplacesKubeProxy(%q) = %v, want %v", tt.plugin, got, tt.want)
+			}
+		})
+	}
+}

@@ -35,6 +35,10 @@ func (*cilium) Name() string { return vatescfg.CNICilium }
 
 func (*cilium) ManifestPath() string { return CiliumManifestPath }
 
+// ReplacesKubeProxy: Cilium is rendered with kubeProxyReplacement off (see the
+// template header), so kube-proxy stays and implements Services.
+func (*cilium) ReplacesKubeProxy() bool { return false }
+
 // RunDirs: the agent keeps its state under /run/cilium, and the pod network
 // namespaces at /run/netns.
 func (*cilium) RunDirs() []string { return []string{"/run/cilium", "/run/netns"} }
