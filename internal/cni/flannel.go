@@ -1,4 +1,4 @@
-package firstboot
+package cni
 
 import "github.com/vatesfr/vates-kube-os/vatescfg"
 
@@ -19,7 +19,23 @@ const (
 	FlannelCNIPluginImage = "ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3"
 )
 
-// FlannelManifest renders the kube-flannel DaemonSet and its supporting objects.
+// flannel is the default pod network, and the one the image is built around:
+// its configuration is the lower layer of the /etc/cni/net.d overlay. Its agent
+// runs alongside kube-proxy rather than replacing it.
+type flannel struct{}
+
+// flannel implements Plugin.
+var _ Plugin = (*flannel)(nil)
+
+func (*flannel) Name() string { return vatescfg.CNIFlannel }
+
+func (*flannel) ManifestPath() string { return FlannelManifestPath }
+
+// RunDirs: flanneld writes the pod network's subnet file into /run/flannel, and
+// the CNI plugin on the host reads it back to configure every pod's sandbox.
+func (*flannel) RunDirs() []string { return []string{"/run/flannel"} }
+
+// Manifest renders the kube-flannel DaemonSet and its supporting objects.
 //
 // The manifest is the flannel v0.26.1 release, embedded in the binary rather
 // than fetched when a node first comes up: it is an artifact of the OS image, and
@@ -35,7 +51,7 @@ const (
 // pulls from a local registry pulls flannel from there too. Without a mirror
 // configured this is the identity, and the manifest is byte-for-byte what it
 // was before the feature existed.
-func FlannelManifest(cfg *vatescfg.Config) ([]byte, error) {
+func (*flannel) Manifest(cfg *vatescfg.Config) ([]byte, error) {
 	return render("kube-flannel.yaml.tmpl", struct {
 		PodCIDR        string
 		FlannelImage   string

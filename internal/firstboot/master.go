@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/internal/configdrive"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
@@ -138,35 +139,33 @@ func RequiredDirs(cfg *vatescfg.Config) []string {
 	// The pod network's runtime state lives on the tmpfs /run, which PID 1
 	// mounts and which a reboot wipes, so it has to be recreated every boot.
 	// It is the CNI's, so it is chosen with the CNI -- a node creates only what
-	// its own CNI needs.
-	dirs = append(dirs, CNIRunDirs(cfg.CNI.Plugin)...)
+	// its own CNI needs (see internal/cni).
+	dirs = append(dirs, cniRunDirs(cfg)...)
 	if cfg.Role == vatescfg.RoleMaster {
 		dirs = append(dirs, EtcdDataDir, ManifestsDir)
 	}
 	return dirs
 }
 
-// CNIRunDirs are the pod network's runtime directories, on the tmpfs /run.
+// cniRunDirs are the pod network's runtime directories, on the tmpfs /run.
 //
-// They are the CNI's, so they are chosen with the CNI:
-//   - flanneld writes the pod network's subnet file into /run/flannel, and the
-//     CNI plugin on the host reads it back to configure every pod's sandbox.
-//   - the Cilium agent keeps its state under /run/cilium and the pod network
-//     namespaces at /run/netns.
-//   - "none" installs no CNI, so the node creates nothing for it.
+// They are the CNI's to declare (see cni.Plugin.RunDirs): flanneld writes the
+// pod network's subnet file into /run/flannel, the Cilium agent keeps its state
+// under /run/cilium and the pod network namespaces at /run/netns, and "none"
+// installs no CNI, so the node creates nothing for it.
 //
 // They are also labelled for containers (see ContainerPaths), and labelling a
 // path that does not exist fails -- which is how a fresh node once failed to
 // configure itself while an already-configured one worked.
-func CNIRunDirs(plugin string) []string {
-	switch plugin {
-	case vatescfg.CNICilium:
-		return []string{"/run/cilium", "/run/netns"}
-	case vatescfg.CNINone:
+//
+// A config that never went through Validate resolves no plugin and yields
+// nothing: an unvalidated name has no runtime directories to create.
+func cniRunDirs(cfg *vatescfg.Config) []string {
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok {
 		return nil
-	default: // CNIFlannel
-		return []string{"/run/flannel"}
 	}
+	return p.RunDirs()
 }
 
 // MasterFiles computes what a bootstrapping control plane node needs on disk

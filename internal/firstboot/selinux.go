@@ -116,8 +116,8 @@ func ContainerPaths(cfg *vatescfg.Config) []string {
 		BinariesDir,
 	}
 	// The pod network's runtime state is the CNI's, so a node labels only what
-	// its own CNI writes (see CNIRunDirs).
-	paths = append(paths, CNIRunDirs(cfg.CNI.Plugin)...)
+	// its own CNI writes (see cni.Plugin.RunDirs).
+	paths = append(paths, cniRunDirs(cfg)...)
 	if cfg.Role == vatescfg.RoleMaster {
 		paths = append(paths, EtcdDataDir)
 	}

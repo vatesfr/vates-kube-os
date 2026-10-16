@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vatesfr/vates-kube-os/internal/firstboot"
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
 
@@ -38,15 +38,11 @@ func run(path string, plugin []string) error {
 	if len(plugin) == 1 {
 		cfg.CNI.Plugin = plugin[0]
 	}
-	var manifest []byte
-	switch cfg.CNI.Plugin {
-	case vatescfg.CNIFlannel:
-		manifest, err = firstboot.FlannelManifest(cfg)
-	case vatescfg.CNICilium:
-		manifest, err = firstboot.CiliumManifest(cfg)
-	default:
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok || p.ManifestPath() == "" {
 		return fmt.Errorf("cni.plugin %q installs no manifest", cfg.CNI.Plugin)
 	}
+	manifest, err := p.Manifest(cfg)
 	if err != nil {
 		return err
 	}

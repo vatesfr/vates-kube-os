@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/internal/configdrive"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
@@ -89,26 +90,20 @@ func bootstrapPhases(cfg *vatescfg.Config) []string {
 // operator's to install from the cluster side, and the node writes nothing, so
 // the path comes back empty and the caller says so out loud.
 //
-// Both manifests are embedded and pinned -- see FlannelManifest and
-// CiliumManifest -- and the pod network they are told is the same field,
-// cni.cidr: flannel is given the range directly, and cilium reads it from the
-// node's podCIDR annotation, which kubeadm writes from it.
+// The plugin owns its manifest and path (see internal/cni): both are embedded
+// and pinned, and the pod network they are told is the same field, cni.cidr --
+// flannel is given the range directly, and cilium reads it from the node's
+// podCIDR annotation, which kubeadm writes from it.
 func cniManifest(cfg *vatescfg.Config) (path string, manifest []byte, err error) {
-	switch cfg.CNI.Plugin {
-	case vatescfg.CNIFlannel:
-		manifest, err = FlannelManifest(cfg)
-		return FlannelManifestPath, manifest, err
-	case vatescfg.CNICilium:
-		manifest, err = CiliumManifest(cfg)
-		return CiliumManifestPath, manifest, err
-	case vatescfg.CNINone:
-		return "", nil, nil
-	default:
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok {
 		// Validate refuses anything else and defaults the empty value, so this
 		// is a Config that was never validated. Installing nothing would leave
 		// the node NotReady with no word as to why.
 		return "", nil, fmt.Errorf("cni.plugin %q is not one the node installs", cfg.CNI.Plugin)
 	}
+	manifest, err = p.Manifest(cfg)
+	return p.ManifestPath(), manifest, err
 }
 
 // JoinAttempts is how many times a control plane's join is retried.

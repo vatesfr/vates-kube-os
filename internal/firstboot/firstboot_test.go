@@ -13,9 +13,25 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/vatesfr/vates-kube-os/internal/cni"
 	"github.com/vatesfr/vates-kube-os/internal/configdrive"
 	"github.com/vatesfr/vates-kube-os/vatescfg"
 )
+
+// cniManifestFor renders the manifest of the pod network cfg selects, through
+// the same registry the node uses.
+func cniManifestFor(t *testing.T, cfg *vatescfg.Config) []byte {
+	t.Helper()
+	p, ok := cni.Lookup(cfg.CNI.Plugin)
+	if !ok {
+		t.Fatalf("cni.Lookup(%q): not a pod network the node installs", cfg.CNI.Plugin)
+	}
+	m, err := p.Manifest(cfg)
+	if err != nil {
+		t.Fatalf("rendering the %s manifest: %v", cfg.CNI.Plugin, err)
+	}
+	return m
+}
 
 const workerDoc = `
 role: worker
@@ -768,13 +784,13 @@ func TestBootstrapAppliesTheCNITheNodeInstalls(t *testing.T) {
 			name:         "flannel",
 			doc:          masterDoc,
 			plugin:       "flannel",
-			wantManifest: FlannelManifestPath,
+			wantManifest: cni.FlannelManifestPath,
 		},
 		{
 			name:         "cilium",
 			doc:          ciliumMasterDoc,
 			plugin:       "cilium",
-			wantManifest: CiliumManifestPath,
+			wantManifest: cni.CiliumManifestPath,
 		},
 		{
 			name:   "none writes and applies nothing",
@@ -815,7 +831,7 @@ func TestBootstrapAppliesTheCNITheNodeInstalls(t *testing.T) {
 			// The OTHER CNI's manifest must not be written or applied either:
 			// a flannel file on a cilium node is the exact bug this feature
 			// exists to prevent.
-			for _, manifest := range []string{FlannelManifestPath, CiliumManifestPath} {
+			for _, manifest := range []string{cni.FlannelManifestPath, cni.CiliumManifestPath} {
 				if manifest == tc.wantManifest {
 					continue
 				}
@@ -853,7 +869,7 @@ func TestBootstrapWritesTheCNIBeforeApplyingIt(t *testing.T) {
 			}
 			var manifest string
 			for _, w := range r.writes {
-				if w == FlannelManifestPath || w == CiliumManifestPath {
+				if w == cni.FlannelManifestPath || w == cni.CiliumManifestPath {
 					manifest = w
 				}
 			}
@@ -905,7 +921,7 @@ func TestBootstrapWritesTheCNIBeforeApplyingIt(t *testing.T) {
 // reports it, rather than staying silently NotReady with no file to read) and
 // must not write the done marker (so the next boot retries the stage whole).
 func TestBootstrapFailureToApplyTheCNIIsReported(t *testing.T) {
-	r := &fakeRunner{healthz: true, failOn: "apply -f " + FlannelManifestPath}
+	r := &fakeRunner{healthz: true, failOn: "apply -f " + cni.FlannelManifestPath}
 	err := Bootstrap(loadConfig(t, masterDoc), bareDrive(t, masterDoc), testPaths(t), "vates-cp-1", "192.168.122.50", r)
 	if err == nil {
 		t.Fatal("Bootstrap() succeeded when applying the CNI manifest failed")
@@ -939,10 +955,7 @@ func TestCNIManifestRefusesAnUnvalidatedPlugin(t *testing.T) {
 // keeps the two interchangeable in vates-node.yaml, so assert the rendering of
 // both sides of the contract.
 func TestCiliumManifestRendersPinnedAndAdapted(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	m := cniManifestFor(t, loadConfig(t, ciliumMasterDoc))
 	for _, want := range []string{
 		// The pin, tag and digest, as the chart carries it.
 		`image: "quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
@@ -1000,10 +1013,7 @@ func TestCiliumManifestRendersPinnedAndAdapted(t *testing.T) {
 // re-introduces CRD documents or strips the operator's create verb is caught
 // here rather than on a node whose agent sits in CrashLoopBackOff.
 func TestCiliumOperatorCreatesTheCRDs(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	m := cniManifestFor(t, loadConfig(t, ciliumMasterDoc))
 	if strings.Contains(string(m), "kind: CustomResourceDefinition") {
 		t.Error("the cilium manifest contains CRD documents; chart 1.20 has no crds/ directory, the operator creates them")
 	}
@@ -1021,10 +1031,7 @@ func TestCiliumOperatorCreatesTheCRDs(t *testing.T) {
 // stays 0 for the same reason: a surge pod on the only node cannot be
 // scheduled either.
 func TestCiliumOperatorUpdateSurvivesASingleNode(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	m := cniManifestFor(t, loadConfig(t, ciliumMasterDoc))
 	dec := yaml.NewDecoder(bytes.NewReader(m))
 	found := false
 	for {
@@ -1075,10 +1082,7 @@ func TestCiliumOperatorUpdateSurvivesASingleNode(t *testing.T) {
 // configuration. The count is the assertion: adding or dropping a resource
 // (an RBAC, a Namespace, a second container) changes it.
 func TestCiliumManifestIsApplicableYAML(t *testing.T) {
-	m, err := CiliumManifest(loadConfig(t, ciliumMasterDoc))
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	m := cniManifestFor(t, loadConfig(t, ciliumMasterDoc))
 	dec := yaml.NewDecoder(bytes.NewReader(m))
 	var kinds []string
 	n := 0
@@ -1187,23 +1191,6 @@ func TestContainerPathsCarryTheCNIState(t *testing.T) {
 			if slices.Contains(paths, a) {
 				t.Errorf("cni.plugin: %s -- ContainerPaths labels %s, the state of a CNI the node does not run: %v", tc.plugin, a, paths)
 			}
-		}
-	}
-}
-
-// The directories the CNI needs under /run differ by plugin, and /run is a
-// tmpfs: the directories must be created every boot, for the plugin selected.
-// A flannel directory on a cilium node is harmless but wrong, and a missing
-// one is a node that cannot configure its pod sandboxes.
-func TestCNIRunDirsPerPlugin(t *testing.T) {
-	cases := map[string][]string{
-		vatescfg.CNIFlannel: {"/run/flannel"},
-		vatescfg.CNICilium:  {"/run/cilium", "/run/netns"},
-		vatescfg.CNINone:    nil,
-	}
-	for plugin, want := range cases {
-		if got := CNIRunDirs(plugin); !slices.Equal(got, want) {
-			t.Errorf("CNIRunDirs(%q) = %v, want %v", plugin, got, want)
 		}
 	}
 }
@@ -1928,10 +1915,7 @@ registry:
 	}
 
 	// 2. Flannel and its CNI plugin.
-	flannel, err := FlannelManifest(cfg)
-	if err != nil {
-		t.Fatalf("FlannelManifest() failed: %v", err)
-	}
+	flannel := cniManifestFor(t, cfg)
 	for _, want := range []string{
 		"image: harbor.vates.local/mirror/docker.io/flannel/flannel:v0.26.1",
 		"image: harbor.vates.local/mirror/ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3",
@@ -1943,10 +1927,7 @@ registry:
 
 	// 3. Cilium's agent and operator, on a node that selects it.
 	ciliumCfg := loadConfig(t, strings.Replace(mirrored, "plugin: flannel", "plugin: cilium", 1))
-	cilium, err := CiliumManifest(ciliumCfg)
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	cilium := cniManifestFor(t, ciliumCfg)
 	for _, want := range []string{
 		`image: "harbor.vates.local/mirror/quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
 		`image: "harbor.vates.local/mirror/quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"`,
@@ -1984,10 +1965,7 @@ func TestWithoutAMirrorNothingIsRewritten(t *testing.T) {
 		t.Error("an imageRepository was emitted with no mirror configured; kubeadm's defaults are correct and ours are not necessarily")
 	}
 
-	flannel, err := FlannelManifest(cfg)
-	if err != nil {
-		t.Fatalf("FlannelManifest() failed: %v", err)
-	}
+	flannel := cniManifestFor(t, cfg)
 	for _, want := range []string{
 		"image: docker.io/flannel/flannel:v0.26.1",
 		"image: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3",
@@ -1998,10 +1976,7 @@ func TestWithoutAMirrorNothingIsRewritten(t *testing.T) {
 	}
 
 	ciliumCfg := loadConfig(t, strings.Replace(masterDoc, "plugin: flannel", "plugin: cilium", 1))
-	cilium, err := CiliumManifest(ciliumCfg)
-	if err != nil {
-		t.Fatalf("CiliumManifest() failed: %v", err)
-	}
+	cilium := cniManifestFor(t, ciliumCfg)
 	for _, want := range []string{
 		`image: "quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"`,
 		`image: "quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"`,
