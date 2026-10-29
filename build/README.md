@@ -82,7 +82,9 @@ or, from `build/`, a single stage:
 ./build.sh follow     # tail the build log
 ```
 
-`build.sh` fetches every pinned source from its upstream URL into `dl/` and
+`build.sh` uses Podman when installed and falls back to Docker otherwise, for
+both the build and disk assembly. It fails immediately if neither is installed.
+It fetches every pinned source from its upstream URL into `dl/` and
 verifies its sha256 before the build, so the container needs no network.
 
 The base image is Fedora (RHEL-family), never Debian; override with

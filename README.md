@@ -45,7 +45,8 @@ the Go + DRM console, preceded by a boot screen of our own.
 
 ## Prerequisites
 
-Building the image needs one thing: **podman** (or docker).
+Building the image needs one thing: **podman** (or docker, selected automatically
+when podman is not installed).
 
 `make cluster` needs, on top of a built image:
 
@@ -78,7 +79,7 @@ seed compiler, and never enters the image.
 make image
 ```
 
-`make image` runs `build/build.sh disk`: a `Containerfile` driven by podman that
+`make image` runs `build/build.sh disk`: a `Containerfile` driven by podman or docker that
 fetches every component from its upstream source (pinned by sha256 in
 `build/pins.conf`), builds the C library, the userspace, the kernel and
 systemd-boot **inside the build**, then lays down the GPT disk with

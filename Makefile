@@ -40,14 +40,14 @@ help: ## Show this help
 # --- building ---------------------------------------------------------------
 
 # The one image: built from pinned upstream sources by build/ -- a Containerfile
-# driven by podman, NOT a distribution. The userspace, glibc,
+# driven by podman or docker, NOT a distribution. The userspace, glibc,
 # the kernel, containerd, the console, systemd-boot and the kubelet image are all
 # built inside it; see build/README.md.
 #
 # The disk lands in build/out/ as vates.qcow2 and vates.vhd. The first build is
 # long (it compiles glibc, the kernel and the console stack); later ones are
 # incremental, and adding a component no longer rebuilds the toolchain.
-image: ## Build the disk (podman: from-scratch userspace + genimage)
+image: ## Build the disk (podman/docker: from-scratch userspace + genimage)
 	@echo "=== building the Vates Kube OS disk (from-scratch builder) ==="
 	./build/build.sh disk
 	@for f in vates.qcow2 vates.vhd; do \

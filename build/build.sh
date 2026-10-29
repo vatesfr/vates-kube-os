@@ -33,6 +33,17 @@ BASE="${VATES_SCRATCH_BASE:-registry.fedoraproject.org/fedora:44}"
 DL="${HERE}/dl"
 IMAGE="${VATES_SCRATCH_IMAGE:-localhost/vates-scratch}"
 
+# Prefer Podman, but use Docker when it is the installed container engine.
+# Check before fetching sources so a missing engine fails immediately.
+if command -v podman >/dev/null 2>&1; then
+	ENGINE=podman
+elif command -v docker >/dev/null 2>&1; then
+	ENGINE=docker
+else
+	echo "no container engine found; install podman or docker" >&2
+	exit 1
+fi
+
 fetch() {
 	local name="$1" version="$2" source="$3" sha="$4" url="$5" dest
 	dest="${DL}/${source}"
@@ -93,8 +104,8 @@ rootfs | disk)
 esac
 
 echo
-echo "=== podman build --target ${TARGET} ==="
-podman build \
+echo "=== ${ENGINE} build --target ${TARGET} ==="
+"${ENGINE}" build \
 	--file "${HERE}/Containerfile" \
 	--tag "${IMAGE}:${TARGET}" \
 	--target "${TARGET}" \
@@ -117,7 +128,7 @@ if [ "${TARGET}" = disk ]; then
 	if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; then
 		run_opts+=(--security-opt label=disable)
 	fi
-	podman run "${run_opts[@]}" -v "${OUT}:/out" "${IMAGE}:${TARGET}" \
+	"${ENGINE}" run "${run_opts[@]}" -v "${OUT}:/out" "${IMAGE}:${TARGET}" \
 		bash /build/lib/assemble.sh
 	echo
 	echo "=== converting ==="
