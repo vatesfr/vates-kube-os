@@ -21,8 +21,9 @@ import (
 // TileLabels is the tile list, in the order someone standing at the machine
 // reads it: what this is, what it is doing, and where it is.
 var TileLabels = []string{
-	"ROLE", "SYSTEM", "ADDRESS", "KUBERNETES", "CONTAINERD",
-	"PODS", "RESTARTS", "CPU", "RAM", "LOAD",
+	"ROLE", "SYSTEM", "KUBERNETES", "DISTRIBUTION",
+	"ADDRESS", "OS", "CONTAINERD", "PODS",
+	"RESTARTS", "CPU", "RAM", "LOAD",
 }
 
 // Tones. A renderer maps these to its own colours; nothing else in the program
@@ -47,13 +48,15 @@ type Tile struct {
 //
 // When the node is not known yet -- the console starts before the kubeconfig
 // exists, which is every boot -- every tile says "-" rather than zero. A zero is
-// a reading, and at that moment there is no reading.
+// a reading, and at that moment there is no reading. The distributions are
+// the exception: they are read locally, and known from the first frame.
 func (s Snapshot) Tiles(h hostinfo.Info) []Tile {
 	if s.Node.Metadata.Name == "" {
 		empty := make([]Tile, len(TileLabels))
 		for i := range empty {
 			empty[i] = Tile{Value: "-"}
 		}
+		empty[3], empty[5] = localTile(h.Distribution), localTile(h.OS)
 		return empty
 	}
 	node := s.Node
@@ -87,8 +90,10 @@ func (s Snapshot) Tiles(h hostinfo.Info) []Tile {
 	return []Tile{
 		{Value: role},
 		{Value: system, Tone: systemTone},
-		{Value: node.Address("InternalIP")},
 		{Value: node.Status.NodeInfo.KubeletVersion},
+		localTile(h.Distribution),
+		{Value: node.Address("InternalIP")},
+		localTile(h.OS),
 		{Value: strings.TrimPrefix(node.Status.NodeInfo.ContainerRuntimeVersion, "containerd://")},
 		{Value: fmt.Sprint(pods)},
 		{Value: fmt.Sprint(restarts), Tone: restartTone},
@@ -96,6 +101,15 @@ func (s Snapshot) Tiles(h hostinfo.Info) []Tile {
 		{Value: fmt.Sprintf("%.0f%%", h.MemPercent()), Note: HumanBytes(h.MemTotal)},
 		{Value: fmt.Sprintf("%.2f %.2f %.2f", h.Load[0], h.Load[1], h.Load[2]), Tone: ToneDim},
 	}
+}
+
+// localTile is a tile read from the machine rather than the API: "-" when the
+// machine did not say.
+func localTile(v string) Tile {
+	if v == "" {
+		return Tile{Value: "-"}
+	}
+	return Tile{Value: v}
 }
 
 // SystemState is the state of the cluster's own components ON THIS NODE: OK

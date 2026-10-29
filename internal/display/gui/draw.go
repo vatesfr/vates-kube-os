@@ -8,9 +8,9 @@ import (
 	"github.com/vatesfr/vates-kube-os/internal/display/gui/render"
 )
 
-// cardColumns is how many tiles fit on a row. Five, as the windowed console had:
-// it is a reading order, not a measurement.
-const cardColumns = 5
+// cardColumns is how many tiles fit on a row: three rows of four, the cluster,
+// the machine, its load. Six on a row cut an address at 1024 pixels.
+const cardColumns = 4
 
 // The colours are the charte's, the same ones the stylesheet gives the windowed
 // console. They are written as hex and converted here so that the two renderings

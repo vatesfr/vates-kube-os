@@ -137,5 +137,7 @@ func mockHost(info hostinfo.Info) hostinfo.Info {
 	info.MemTotal = 3 << 30
 	info.MemUsed = uint64(3<<30) * 41 / 100
 	info.Load = [3]float64{0.03, 0.07, 0.08}
+	info.OS = "AlmaLinux 10.0"
+	info.Distribution = "kubeadm"
 	return info
 }

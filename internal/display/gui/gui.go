@@ -458,7 +458,8 @@ func (s *screen) layout() {
 	s.tilesTop = s.headerTop + s.headerH + s.u(14)
 	s.tileH = s.u(60)
 	s.tileGap = s.u(refTileGap)
-	tilesBottom := s.tilesTop + 2*s.tileH + s.tileGap
+	rows := (len(dashboard.TileLabels) + cardColumns - 1) / cardColumns
+	tilesBottom := s.tilesTop + rows*s.tileH + (rows-1)*s.tileGap
 
 	s.sectionTop = tilesBottom + s.u(16)
 	s.panelX = s.padding
