@@ -158,15 +158,10 @@ RUN /build/lib/run-recipe.sh xen-guest-agent
 # containerd, runc and the CNI plugins, from upstream release artifacts. What
 # Kubernetes needs to run the pods and the control plane.
 FROM console AS runtime
-# The Mozilla CA bundle, pinned by sha. containerd pulls the Kubernetes images
+# The Mozilla CA bundle, pinned by date and sha in pins.conf. containerd pulls the Kubernetes images
 # over TLS and the launcher fetches binaries over TLS; without it both fail with
 # "x509: certificate signed by unknown authority").
-ARG CA_URL=https://curl.se/ca/cacert.pem
-ARG CA_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
-RUN set -eux; \
-	mkdir -p /sysroot/etc/ssl/certs; \
-	curl -fL --retry 3 -o /sysroot/etc/ssl/certs/ca-certificates.crt "${CA_URL}"; \
-	echo "${CA_SHA256}  /sysroot/etc/ssl/certs/ca-certificates.crt" | sha256sum -c -
+COPY dl/cacert-2026-10-20.pem /sysroot/etc/ssl/certs/ca-certificates.crt
 COPY recipes/runtime/containerd.sh /build/recipes/runtime/containerd.sh
 RUN /build/lib/run-recipe.sh containerd
 COPY recipes/runtime/runc.sh /build/recipes/runtime/runc.sh
