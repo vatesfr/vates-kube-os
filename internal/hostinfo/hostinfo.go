@@ -28,6 +28,12 @@ type Info struct {
 	Gateways []string
 	DNS      []string
 	NTP      []string
+
+	// OS is the Linux distribution, from /etc/os-release, and Distribution the
+	// Kubernetes one. Both are local, so the screen names them before the node
+	// has joined.
+	OS           string
+	Distribution string
 }
 
 type cpuTimes struct{ busy, total uint64 }
@@ -54,7 +60,47 @@ func (r *Reader) Read() Info {
 	i.Gateways = gateways()
 	i.DNS = dnsServers()
 	i.NTP = ntpServers()
+	i.OS = osName()
+	i.Distribution = distribution()
 	return i
+}
+
+// osName is NAME and VERSION_ID from /etc/os-release: "AlmaLinux 10.0". Short
+// on purpose, PRETTY_NAME's codename does not fit a tile.
+func osName() string {
+	b, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return ""
+	}
+	return parseOSRelease(string(b))
+}
+
+func parseOSRelease(s string) string {
+	var name, version string
+	for line := range strings.SplitSeq(s, "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		switch k {
+		case "NAME":
+			name = v
+		case "VERSION_ID":
+			version = v
+		}
+	}
+	return strings.TrimSpace(name + " " + version)
+}
+
+// distribution is the Kubernetes distribution, from DASHBOARD_K8S_DISTRIBUTION:
+// the image that installs the console says what it built. Every node this
+// console knows is bootstrapped by kubeadm, hence the default.
+func distribution() string {
+	if v := os.Getenv("DASHBOARD_K8S_DISTRIBUTION"); v != "" {
+		return v
+	}
+	return "kubeadm"
 }
 
 // CPUPercent returns the busy percentage as a number, or -1 when unknown.

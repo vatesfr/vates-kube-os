@@ -98,3 +98,13 @@ func TestDetectPlatform(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOSReleaseIsNameAndVersion(t *testing.T) {
+	doc := "NAME=\"AlmaLinux\"\nVERSION=\"10.0 (Purple Lion)\"\nVERSION_ID='10.0'\nPRETTY_NAME=\"AlmaLinux 10.0 (Purple Lion)\"\n"
+	if got := parseOSRelease(doc); got != "AlmaLinux 10.0" {
+		t.Errorf("parseOSRelease = %q, want %q", got, "AlmaLinux 10.0")
+	}
+	if got := parseOSRelease("NAME=Vates Kube OS\n"); got != "Vates Kube OS" {
+		t.Errorf("parseOSRelease without VERSION_ID = %q", got)
+	}
+}

@@ -521,6 +521,8 @@ func (m Model) grid(inner int) string {
 		field("TAINTS", taints, dimStyle),
 		field("KUBERNETES", m.version(), valueStyle),
 		field("KUBELET", n.Status.NodeInfo.KubeletVersion, valueStyle),
+		field("DISTRIBUTION", m.hostInfo.Distribution, valueStyle),
+		field("OS", m.hostInfo.OS, valueStyle),
 		field("CONTAINERD", n.Status.NodeInfo.ContainerRuntimeVersion, valueStyle),
 		field("PODS", pods, strongStyle),
 		field("RESTARTS", restarts, valueStyle),
