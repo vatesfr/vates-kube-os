@@ -224,12 +224,38 @@ func TestSystemStateTellsTheComponentsFromTheNode(t *testing.T) {
 	  {"metadata":{"namespace":"demo","name":"hello"},
 	   "status":{"containerStatuses":[{"name":"c","ready":false}]}}
 	]}`)
-	if v, tone := s.SystemState(); v != "Degraded" || tone != ToneWarn {
-		t.Errorf("SYSTEM = %q (%s), want Degraded/warn: a component is not ready, the demo pod is not a component", v, tone)
+	systemSeenOK.Store(false)
+	t.Cleanup(func() { systemSeenOK.Store(false) })
+	if v, tone := s.SystemState(); v != "Starting" || tone != ToneDim {
+		t.Errorf("SYSTEM = %q (%s), want Starting/dim: a component is not up yet, the demo pod is not a component", v, tone)
 	}
 
-	s.Pods[1].Status.ContainerStatuses[0].Ready = true
+	// Before the first OK, a component that has already failed is Degraded.
+	coredns := &s.Pods[1].Status.ContainerStatuses[0]
+	coredns.RestartCount = 1
+	if v, tone := s.SystemState(); v != "Degraded" || tone != ToneWarn {
+		t.Errorf("restarted component: SYSTEM = %q (%s), want Degraded/warn", v, tone)
+	}
+	coredns.RestartCount = 0
+	s.Pods = append(s.Pods, podsFromJSON(t, `{"items":[
+	  {"metadata":{"namespace":"kube-flannel","name":"flannel"},
+	   "status":{"containerStatuses":[{"name":"c","ready":false,
+	     "state":{"waiting":{"reason":"CrashLoopBackOff"}}}]}}
+	]}`)...)
+	if v, _ := s.SystemState(); v != "Degraded" {
+		t.Errorf("crash-looping component: SYSTEM = %q, want Degraded", v)
+	}
+	s.Pods = s.Pods[:3]
+
+	coredns.Ready = true
 	if v, tone := s.SystemState(); v != "OK" || tone != ToneGood {
 		t.Errorf("SYSTEM = %q (%s), want OK/good", v, tone)
+	}
+
+	// Once OK has been seen, an unready component is a regression even with no
+	// failure sign: a readiness probe can fail without a restart.
+	coredns.Ready = false
+	if v, tone := s.SystemState(); v != "Degraded" || tone != ToneWarn {
+		t.Errorf("after OK: SYSTEM = %q (%s), want Degraded/warn", v, tone)
 	}
 }

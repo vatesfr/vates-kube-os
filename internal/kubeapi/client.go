@@ -112,12 +112,35 @@ type Pod struct {
 			Name         string `json:"name"`
 			Ready        bool   `json:"ready"`
 			RestartCount int    `json:"restartCount"`
+			ContainerState
 		} `json:"containerStatuses"`
 		InitContainerStatuses []struct {
 			Name  string `json:"name"`
 			Ready bool   `json:"ready"`
+			ContainerState
 		} `json:"initContainerStatuses"`
 	} `json:"status"`
+}
+
+// ContainerState is what a container is doing now and how it last ended: the
+// part that tells a container that has not started yet from one that has died.
+type ContainerState struct {
+	State struct {
+		Waiting *struct {
+			Reason string `json:"reason"`
+		} `json:"waiting"`
+	} `json:"state"`
+	LastState struct {
+		Terminated *struct{} `json:"terminated"`
+	} `json:"lastState"`
+}
+
+// WaitingReason is why the container is waiting, or "" when it is not.
+func (c ContainerState) WaitingReason() string {
+	if c.State.Waiting == nil {
+		return ""
+	}
+	return c.State.Waiting.Reason
 }
 
 // Ready reports how many containers of the pod are ready, and how many there

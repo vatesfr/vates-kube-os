@@ -12,6 +12,7 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/vatesfr/vates-kube-os/internal/hostinfo"
@@ -113,7 +114,13 @@ func localTile(v string) Tile {
 }
 
 // SystemState is the state of the cluster's own components ON THIS NODE: OK
-// when every system pod there is ready, Degraded when one is not.
+// when every system pod there is ready, Starting while the ones that are not
+// are still coming up for the first time, Degraded otherwise.
+//
+// Starting needs two things. No unready pod shows a failure (a restart, a
+// container that ran and ended, a back-off), and this console has not seen OK
+// yet: after it has, an unready component is a regression even if it looks
+// fresh, which covers a readiness probe that fails without a restart.
 //
 // It is the component level, which the node's Ready condition (the header pill)
 // knows nothing about: a node is Ready while Cilium, CoreDNS or the control
@@ -124,7 +131,7 @@ func localTile(v string) Tile {
 // The only "cluster" a node's console can see is this one -- the kubelet
 // identity reads its own node and the pods bound to it, never cluster-wide.
 func (s Snapshot) SystemState() (value, tone string) {
-	ready, total := 0, 0
+	ready, total, failing := 0, 0, false
 	for _, p := range s.Pods {
 		if !systemNamespace(p.Metadata.Namespace) {
 			continue
@@ -133,6 +140,8 @@ func (s Snapshot) SystemState() (value, tone string) {
 		total++
 		if t > 0 && r == t {
 			ready++
+		} else if podFailing(p) {
+			failing = true
 		}
 	}
 	if total == 0 {
@@ -141,9 +150,48 @@ func (s Snapshot) SystemState() (value, tone string) {
 		return "-", ToneNone
 	}
 	if ready == total {
+		systemSeenOK.Store(true)
 		return "OK", ToneGood
 	}
+	if !failing && !systemSeenOK.Load() {
+		return "Starting", ToneDim
+	}
 	return "Degraded", ToneWarn
+}
+
+// systemSeenOK latches once SystemState has said OK.
+//
+// ponytail: per process, not per node. The console runs once per boot, so
+// "first time" means "this boot"; a console restarted on a node whose
+// components are unready without a failure sign reads Starting until they
+// are up.
+var systemSeenOK atomic.Bool
+
+// failingReasons are the waiting reasons of a container that has tried and
+// failed, as opposed to one that is still being created.
+var failingReasons = map[string]bool{
+	"CrashLoopBackOff":           true,
+	"ImagePullBackOff":           true,
+	"ErrImagePull":               true,
+	"CreateContainerError":       true,
+	"CreateContainerConfigError": true,
+	"RunContainerError":          true,
+}
+
+// podFailing reports whether an unready pod shows a sign that it has already
+// failed, rather than only not having come up yet.
+func podFailing(p kubeapi.Pod) bool {
+	for _, c := range p.Status.InitContainerStatuses {
+		if c.LastState.Terminated != nil || failingReasons[c.WaitingReason()] {
+			return true
+		}
+	}
+	for _, c := range p.Status.ContainerStatuses {
+		if c.RestartCount > 0 || c.LastState.Terminated != nil || failingReasons[c.WaitingReason()] {
+			return true
+		}
+	}
+	return false
 }
 
 // systemNamespace reports whether a namespace holds the cluster's components
